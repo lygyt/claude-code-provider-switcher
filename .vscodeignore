@@ -1,0 +1,16 @@
+node_modules/**
+src/**
+test/**
+dist/test/**
+dist/**/*.map
+.claude-code-provider-switcher/**
+Readme/**
+.gitignore
+eslint.config.js
+tsconfig.json
+*.vsix
+*.log
+scripts/test-workflow*.mjs
+scripts/research-workflow-*.cjs
+scripts/research-workflow-report.md
+scripts/vscode-stub.cjs

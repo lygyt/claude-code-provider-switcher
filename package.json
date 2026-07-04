@@ -1,0 +1,522 @@
+{
+  "name": "claude-code-provider-switcher",
+  "displayName": "Claude Code Provider Switcher",
+  "description": "Switch Claude Code between Anthropic, DeepSeek, GLM, Kimi, and other Anthropic-compatible providers. Includes multi-model collaborative workflows with code execution, review loops, and LaTeX paper generation.",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "icon": "media/icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/claude-code-provider-switcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YOUR_USERNAME/claude-code-provider-switcher/issues"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "anthropic",
+    "deepseek",
+    "provider",
+    "terminal"
+  ],
+  "main": "./dist/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:claudeCodeProviderSwitcher.selectProvider",
+    "onCommand:claudeCodeProviderSwitcher.addProvider",
+    "onCommand:claudeCodeProviderSwitcher.editProvider",
+    "onCommand:claudeCodeProviderSwitcher.deleteProvider",
+    "onCommand:claudeCodeProviderSwitcher.launchCurrentProvider",
+    "onCommand:claudeCodeProviderSwitcher.resetPresets",
+    "onCommand:claudeCodeProviderSwitcher.openSidebar",
+    "onCommand:claudeCodeProviderSwitcher.openProviderConfig",
+    "onCommand:claudeCodeProviderSwitcher.refreshProviders",
+    "onCommand:claudeCodeProviderSwitcher.selectProviderFromView",
+    "onCommand:claudeCodeProviderSwitcher.refreshConversations",
+    "onCommand:claudeCodeProviderSwitcher.resumeConversation",
+    "onCommand:claudeCodeProviderSwitcher.refreshSkills",
+    "onCommand:claudeCodeProviderSwitcher.openSkillConfig",
+    "onCommand:claudeCodeProviderSwitcher.selectSkill",
+    "onCommand:claudeCodeProviderSwitcher.selectNoSkill",
+    "onCommand:claudeCodeProviderSwitcher.useSkill",
+    "onCommand:claudeCodeProviderSwitcher.installSkill",
+    "onCommand:claudeCodeProviderSwitcher.uninstallSkill",
+    "onCommand:claudeCodeProviderSwitcher.reinstallSkill",
+    "onCommand:claudeCodeProviderSwitcher.clearInstalledSkills",
+    "onCommand:claudeCodeProviderSwitcher.installSkillGroup",
+    "onCommand:claudeCodeProviderSwitcher.newSkillGroup",
+    "onCommand:claudeCodeProviderSwitcher.renameSkillGroup",
+    "onCommand:claudeCodeProviderSwitcher.deleteSkillGroup",
+    "onCommand:claudeCodeProviderSwitcher.addSkillToGroup",
+    "onCommand:claudeCodeProviderSwitcher.removeSkillFromGroup",
+    "onCommand:claudeCodeProviderSwitcher.moveSkillToGroup",
+    "onCommand:claudeCodeProviderSwitcher.importSkillFromGitHub",
+    "onCommand:claudeCodeProviderSwitcher.newWorkflow",
+    "onCommand:claudeCodeProviderSwitcher.editWorkflow",
+    "onCommand:claudeCodeProviderSwitcher.deleteWorkflow",
+    "onCommand:claudeCodeProviderSwitcher.duplicateWorkflow",
+    "onCommand:claudeCodeProviderSwitcher.runWorkflow",
+    "onCommand:claudeCodeProviderSwitcher.refreshWorkflows",
+    "onView:claudeCodeProviderSwitcher.providers",
+    "onView:claudeCodeProviderSwitcher.conversationHistory",
+    "onView:claudeCodeProviderSwitcher.skills",
+    "onView:claudeCodeProviderSwitcher.workflows"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeCodeProviderSwitcher.selectProvider",
+        "title": "Claude Code: Select Provider"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.addProvider",
+        "title": "Claude Code: Add Provider"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.editProvider",
+        "title": "Claude Code: Edit Provider"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.deleteProvider",
+        "title": "Claude Code: Delete Provider"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.launchCurrentProvider",
+        "title": "Claude Code: Launch With Current Provider"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.resetPresets",
+        "title": "Claude Code: Reset Built-in Presets"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.openSidebar",
+        "title": "Claude Code: Open Sidebar",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.openProviderConfig",
+        "title": "Claude Code: Open Provider Config",
+        "icon": "$(json)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.refreshProviders",
+        "title": "Claude Code: Refresh Providers",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.refreshConversations",
+        "title": "Claude Code: Refresh Conversation History",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.resumeConversation",
+        "title": "Claude Code: Resume Conversation"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.refreshSkills",
+        "title": "Claude Code: Refresh Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.openSkillConfig",
+        "title": "Claude Code: Open Skill Config",
+        "icon": "$(json)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.selectSkill",
+        "title": "Claude Code: Select Active Skill"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.selectNoSkill",
+        "title": "Claude Code: Clear Active Skill",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.useSkill",
+        "title": "Claude Code: Toggle Active Skill",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.installSkill",
+        "title": "Claude Code: Install Skill",
+        "icon": "$(check)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.uninstallSkill",
+        "title": "Claude Code: Uninstall Skill",
+        "icon": "$(close)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.reinstallSkill",
+        "title": "Claude Code: Reinstall Skill",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.clearInstalledSkills",
+        "title": "Claude Code: Clear Installed Skills",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.installSkillGroup",
+        "title": "Claude Code: Install Skill Group",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.newSkillGroup",
+        "title": "Claude Code: New Skill Group",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.renameSkillGroup",
+        "title": "Claude Code: Rename Skill Group",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.deleteSkillGroup",
+        "title": "Claude Code: Delete Skill Group",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.addSkillToGroup",
+        "title": "Claude Code: Add Skill To Group",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.removeSkillFromGroup",
+        "title": "Claude Code: Remove Skill From Group",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.moveSkillToGroup",
+        "title": "Claude Code: Move Skill To Group",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.importSkillFromGitHub",
+        "title": "Claude Code: Import Skill from GitHub",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.newWorkflow",
+        "title": "Claude Code: New Workflow",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.editWorkflow",
+        "title": "Claude Code: Edit Workflow",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.deleteWorkflow",
+        "title": "Claude Code: Delete Workflow",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.duplicateWorkflow",
+        "title": "Claude Code: Duplicate Workflow",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.runWorkflow",
+        "title": "Claude Code: Run Workflow",
+        "icon": "$(play)"
+      },
+      {
+        "command": "claudeCodeProviderSwitcher.refreshWorkflows",
+        "title": "Claude Code: Refresh Workflows",
+        "icon": "$(refresh)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeCodeProviderSwitcher.selectProvider",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeCodeProviderSwitcher",
+          "title": "Claude Code",
+          "icon": "media/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeCodeProviderSwitcher": [
+        {
+          "id": "claudeCodeProviderSwitcher.providers",
+          "name": "Claude Code Providers",
+          "type": "webview",
+          "when": "true"
+        },
+        {
+          "id": "claudeCodeProviderSwitcher.conversationHistory",
+          "name": "Claude Code History",
+          "when": "true"
+        },
+        {
+          "id": "claudeCodeProviderSwitcher.skills",
+          "name": "Claude Code Skills",
+          "when": "true"
+        },
+        {
+          "id": "claudeCodeProviderSwitcher.workflows",
+          "name": "Claude Code Workflows",
+          "when": "true"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeCodeProviderSwitcher.refreshConversations",
+          "when": "view == claudeCodeProviderSwitcher.conversationHistory",
+          "group": "navigation"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.refreshSkills",
+          "when": "view == claudeCodeProviderSwitcher.skills",
+          "group": "navigation"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.importSkillFromGitHub",
+          "when": "view == claudeCodeProviderSwitcher.skills",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.newSkillGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.openSkillConfig",
+          "when": "view == claudeCodeProviderSwitcher.skills",
+          "group": "navigation@3"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.selectNoSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills",
+          "group": "navigation@4"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.newWorkflow",
+          "when": "view == claudeCodeProviderSwitcher.workflows",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.refreshWorkflows",
+          "when": "view == claudeCodeProviderSwitcher.workflows",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeCodeProviderSwitcher.installSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillAvailable",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.installSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillAvailableGrouped",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.uninstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalled",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.uninstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalledGrouped",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.uninstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillMissing",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.uninstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillMissingGrouped",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.reinstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalled",
+          "group": "skill@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.reinstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalledGrouped",
+          "group": "skill@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.reinstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillAvailable",
+          "group": "skill@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.reinstallSkill",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillAvailableGrouped",
+          "group": "skill@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.clearInstalledSkills",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalledRoot",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.installSkillGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillGroup",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.addSkillToGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillGroup",
+          "group": "group"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.renameSkillGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillGroup",
+          "group": "group@2"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.deleteSkillGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillGroup",
+          "group": "group@3"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.moveSkillToGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillAvailableGrouped",
+          "group": "group"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.moveSkillToGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalledGrouped",
+          "group": "group"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.removeSkillFromGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillAvailableGrouped",
+          "group": "group@2"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.removeSkillFromGroup",
+          "when": "view == claudeCodeProviderSwitcher.skills && viewItem == claudeSkillInstalledGrouped",
+          "group": "group@2"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.runWorkflow",
+          "when": "view == claudeCodeProviderSwitcher.workflows && viewItem == claudeWorkflow",
+          "group": "inline"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.editWorkflow",
+          "when": "view == claudeCodeProviderSwitcher.workflows && viewItem == claudeWorkflow",
+          "group": "workflow@1"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.duplicateWorkflow",
+          "when": "view == claudeCodeProviderSwitcher.workflows && viewItem == claudeWorkflow",
+          "group": "workflow@2"
+        },
+        {
+          "command": "claudeCodeProviderSwitcher.deleteWorkflow",
+          "when": "view == claudeCodeProviderSwitcher.workflows && viewItem == claudeWorkflow",
+          "group": "workflow@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Claude Code Provider Switcher",
+      "properties": {
+        "claudeCodeProviderSwitcher.launchAfterSelection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Launch a new Claude Code terminal after selecting a provider."
+        },
+        "claudeCodeProviderSwitcher.checkClaudeCliBeforeLaunch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check whether the Claude Code CLI is available before launching."
+        },
+        "claudeCodeProviderSwitcher.terminalNameFormat": {
+          "type": "string",
+          "default": "CC · ${provider}",
+          "description": "Terminal name format. Use ${provider} as the provider placeholder."
+        },
+        "claudeCodeProviderSwitcher.terminalLocation": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "default": "editor",
+          "description": "Where new Claude Code terminals open. Use editor for a new editor tab per provider switch, or panel for the terminal panel."
+        },
+        "claudeCodeProviderSwitcher.conversationMode": {
+          "type": "string",
+          "enum": [
+            "continue",
+            "resumePicker",
+            "fresh"
+          ],
+          "default": "fresh",
+          "description": "How Claude Code sessions are started. continue shares the current workspace's most recent conversation across provider switches; resumePicker opens Claude Code's resume picker; fresh starts a new conversation."
+        },
+        "claudeCodeProviderSwitcher.permissionMode": {
+          "type": "string",
+          "enum": [
+            "requestApproval",
+            "fullAccess"
+          ],
+          "enumDescriptions": [
+            "Normal Claude Code permissions. Tool use requests approval when Claude Code requires it.",
+            "Full access. Starts Claude Code with --permission-mode bypassPermissions."
+          ],
+          "default": "requestApproval",
+          "description": "Permission mode for new Claude Code terminals."
+        },
+        "claudeCodeProviderSwitcher.claudeExecutablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Full path to the claude executable. Leave empty to auto-detect. On Windows, if auto-detection fails, run `where claude` in a terminal and paste the path here (e.g. C:\\Users\\you\\AppData\\Roaming\\npm\\claude.cmd)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "vscode:prepublish": "npm run lint && npm run test && npm run compile"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.1",
+    "@types/node": "^22.15.34",
+    "@types/vscode": "^1.93.0",
+    "@typescript-eslint/eslint-plugin": "^8.35.1",
+    "@typescript-eslint/parser": "^8.35.1",
+    "@vscode/vsce": "^3.6.0",
+    "eslint": "^9.30.1",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.35.1",
+    "vitest": "^3.2.4"
+  }
+}
