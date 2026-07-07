@@ -42,6 +42,14 @@ export class ProviderStore {
   private readonly secrets: ProviderStoreStorage["secrets"];
   private readonly configFilePath: string;
   private readonly legacyTokenFilePath: string;
+  /**
+   * Serializes all read-modify-write operations on the config file within this
+   * process. Without it, concurrent commands (webview refresh, select provider,
+   * add provider, ...) race on readConfigFile -> writeConfigFile and the last
+   * writer wins, silently dropping providers. See the "providers disappear
+   * after a while" bug.
+   */
+  private configWriteChain: Promise<void> = Promise.resolve();
 
   public constructor(storage: ProviderStoreStorage) {
     this.globalState = storage.globalState;
@@ -58,6 +66,10 @@ export class ProviderStore {
     const loaded = await this.loadProviders();
     const providers = loaded.providers;
     if (providers.length === 0) {
+      // Only reached when BOTH the config file and globalState have no providers
+      // (genuine first run). On corruption, loadProviders falls back to the
+      // globalState backup that every save writes first — so a half-written
+      // config file can never erase custom providers here.
       await this.saveProviders(createBuiltInPresets());
       return;
     }
@@ -92,8 +104,7 @@ export class ProviderStore {
       updatedAt: timestamp
     };
 
-    const providers = await this.getProviders();
-    await this.saveProviders([...providers, provider]);
+    await this.mutateProviders((providers) => [...providers, provider]);
 
     if (token?.trim()) {
       await this.setToken(provider.id, token.trim());
@@ -103,23 +114,26 @@ export class ProviderStore {
   }
 
   public async updateProvider(id: string, draft: ProviderProfileDraft, secretChange: SecretChange): Promise<ProviderProfile> {
-    const providers = await this.getProviders();
-    const index = providers.findIndex((provider) => provider.id === id);
-    if (index === -1) {
-      throw new Error("Provider no longer exists.");
-    }
+    let updated: ProviderProfile | undefined;
+    await this.mutateProviders((providers) => {
+      const index = providers.findIndex((provider) => provider.id === id);
+      if (index === -1) {
+        throw new Error("Provider no longer exists.");
+      }
 
-    const existing = providers[index];
-    const updated: ProviderProfile = {
-      ...existing,
-      ...sanitizeDraft(draft),
-      id: existing.id,
-      createdAt: existing.createdAt,
-      updatedAt: nowIso()
-    };
+      const existing = providers[index];
+      updated = {
+        ...existing,
+        ...sanitizeDraft(draft),
+        id: existing.id,
+        createdAt: existing.createdAt,
+        updatedAt: nowIso()
+      };
 
-    providers[index] = updated;
-    await this.saveProviders(providers);
+      const next = [...providers];
+      next[index] = updated;
+      return next;
+    });
 
     if (secretChange.kind === "replace") {
       await this.setToken(id, secretChange.token);
@@ -127,19 +141,40 @@ export class ProviderStore {
       await this.deleteToken(id);
     }
 
-    return updated;
+    return updated!;
   }
 
   public async deleteProvider(id: string): Promise<void> {
-    const providers = await this.getProviders();
-    const nextProviders = providers.filter((provider) => provider.id !== id);
-    await this.saveProviders(nextProviders);
+    await this.mutateProviders((providers) => providers.filter((provider) => provider.id !== id));
     await this.deleteToken(id);
 
     const activeProviderId = await this.getActiveProviderId();
     if (activeProviderId === id) {
       await this.setActiveProviderId(undefined);
     }
+  }
+
+  /**
+   * Read-modify-write the provider list atomically (process-wide) so concurrent
+   * addProvider/updateProvider/deleteProvider calls cannot drop each other. The
+   * mutate callback receives the freshest in-memory state and returns the new
+   * list; saveProviders persists it under the lock.
+   */
+  private async mutateProviders(
+    mutate: (providers: ProviderProfile[]) => ProviderProfile[]
+  ): Promise<void> {
+    await this.runConfigWrite(async () => {
+      const loaded = await this.loadProviders();
+      const next = mutate(loaded.providers);
+      const cloned = cloneProviders(next);
+      await this.globalState.update(providersKey, cloned);
+      const legacyActiveProviderId = this.globalState.get<string>(activeProviderIdKey);
+      await this.updateConfigFile((config) => ({
+        ...config,
+        providers: cloned,
+        activeProviderId: config.activeProviderId ?? legacyActiveProviderId
+      }));
+    });
   }
 
   public async getActiveProviderId(): Promise<string | undefined> {
@@ -152,14 +187,16 @@ export class ProviderStore {
   }
 
   public async setActiveProviderId(id: string | undefined): Promise<void> {
-    await this.updateConfigFile((config) => {
-      if (id?.trim()) {
-        return { ...config, activeProviderId: id.trim() };
-      }
+    await this.runConfigWrite(async () => {
+      await this.updateConfigFile((config) => {
+        if (id?.trim()) {
+          return { ...config, activeProviderId: id.trim() };
+        }
 
-      const nextConfig = { ...config };
-      delete nextConfig.activeProviderId;
-      return nextConfig;
+        const nextConfig = { ...config };
+        delete nextConfig.activeProviderId;
+        return nextConfig;
+      });
     });
     await this.globalState.update(activeProviderIdKey, id);
   }
@@ -197,13 +234,15 @@ export class ProviderStore {
   }
 
   public async setToken(providerId: string, token: string): Promise<void> {
-    await this.updateConfigFile((config) => ({
-      ...config,
-      tokens: {
-        ...(config.tokens ?? {}),
-        [providerId]: token
-      }
-    }));
+    await this.runConfigWrite(async () => {
+      await this.updateConfigFile((config) => ({
+        ...config,
+        tokens: {
+          ...(config.tokens ?? {}),
+          [providerId]: token
+        }
+      }));
+    });
 
     try {
       await this.secrets.store(secretKey(providerId), token);
@@ -213,13 +252,14 @@ export class ProviderStore {
   }
 
   public async deleteToken(providerId: string): Promise<void> {
-    await this.updateConfigFile((config) => {
-      const tokens = { ...(config.tokens ?? {}) };
-      delete tokens[providerId];
-      return { ...config, tokens };
+    await this.runConfigWrite(async () => {
+      await this.updateConfigFile((config) => {
+        const tokens = { ...(config.tokens ?? {}) };
+        delete tokens[providerId];
+        return { ...config, tokens };
+      });
+      await this.deleteLegacyToken(providerId);
     });
-
-    await this.deleteLegacyToken(providerId);
 
     try {
       await this.secrets.delete(secretKey(providerId));
@@ -248,13 +288,34 @@ export class ProviderStore {
 
   private async saveProviders(providers: ProviderProfile[]): Promise<void> {
     const clonedProviders = cloneProviders(providers);
-    const legacyActiveProviderId = this.globalState.get<string>(activeProviderIdKey);
-    await this.updateConfigFile((config) => ({
-      ...config,
-      providers: clonedProviders,
-      activeProviderId: config.activeProviderId ?? legacyActiveProviderId
-    }));
+    // Persist the in-memory backup FIRST. globalState is our durable fallback
+    // if the on-disk file write fails or is interrupted — ensureBuiltInPresets
+    // falls back to it instead of nuking custom providers.
     await this.globalState.update(providersKey, clonedProviders);
+    await this.runConfigWrite(async () => {
+      const legacyActiveProviderId = this.globalState.get<string>(activeProviderIdKey);
+      await this.updateConfigFile((config) => ({
+        ...config,
+        providers: clonedProviders,
+        activeProviderId: config.activeProviderId ?? legacyActiveProviderId
+      }));
+    });
+  }
+
+  /**
+   * Run a config read-modify-write op on the process-wide write queue so
+   * concurrent callers cannot interleave reads and writes and lose data.
+   * Errors are propagated, but the chain is kept regardless of outcome.
+   */
+  private async runConfigWrite<T>(op: () => Promise<T>): Promise<T> {
+    const next = this.configWriteChain.then(op, op);
+    // Reset the chain to a resolved promise once settled, so a transient
+    // failure can't poison every subsequent write.
+    this.configWriteChain = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
   }
 
   private async readConfigFile(): Promise<ProviderConfigFile> {
@@ -286,10 +347,26 @@ export class ProviderStore {
     await this.writeConfigFile(update(config));
   }
 
+  /**
+   * Atomically replace the config file: write to a sibling temp file then rename
+   * onto the final path. A direct fs.writeFile can be interrupted mid-write
+   * (concurrent watcher, antivirus, another window), leaving a truncated config
+   * that loses every provider on the next load. Rename is atomic on the same
+   * volume, and the temp file lives in the same directory as the target.
+   */
   private async writeConfigFile(config: ProviderConfigFile): Promise<void> {
     const normalized = normalizeConfigFile(config);
-    await fs.mkdir(path.dirname(this.configFilePath), { recursive: true });
-    await fs.writeFile(this.configFilePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+    const directory = path.dirname(this.configFilePath);
+    await fs.mkdir(directory, { recursive: true });
+    const payload = `${JSON.stringify(normalized, null, 2)}\n`;
+    const tempFilePath = `${this.configFilePath}.${process.pid}.tmp`;
+    await fs.writeFile(tempFilePath, payload, "utf8");
+    try {
+      await fs.rename(tempFilePath, this.configFilePath);
+    } catch (error) {
+      await fs.unlink(tempFilePath).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async readLegacyTokenFile(): Promise<Record<string, string>> {

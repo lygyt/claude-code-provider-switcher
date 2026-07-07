@@ -234,4 +234,56 @@ describe("ProviderStore", () => {
     expect(await store.getProviders()).toHaveLength(1);
     expect(await store.getToken(presetIds.deepSeek)).toBe("bom-token");
   });
+
+  it("does not lose custom providers when the config file becomes corrupt", async () => {
+    const { store, configFilePath } = await createStore();
+    await store.ensureBuiltInPresets();
+    const custom = await store.addProvider({ name: "My Custom", authType: "anthropic-api-key" }, "tok");
+
+    // Simulate a truncated / half-written config.json on disk \u2014 exactly what a
+    // crashed or interrupted non-atomic write leaves behind.
+    await fs.writeFile(configFilePath, "{ \"version\": 1, \"providers\": [", "utf8");
+
+    await store.ensureBuiltInPresets();
+    const providers = await store.getProviders();
+
+    expect(providers.some((provider) => provider.id === custom.id)).toBe(true);
+    expect(providers.some((provider) => provider.name === "My Custom")).toBe(true);
+  });
+
+  it("does not lose custom providers when globalState is the only source after disk failure", async () => {
+    const { store, globalState, configFilePath } = await createStore();
+    await store.ensureBuiltInPresets();
+    const custom = await store.addProvider({ name: "Survivor", authType: "oauth" });
+
+    // Wipe the file entirely so loadProviders falls back to globalState.
+    await fs.rm(configFilePath, { force: true });
+    // globalState currently holds the last fully-saved provider list.
+    expect(globalState.get<unknown[]>(providersKey)).toBeDefined();
+
+    await store.ensureBuiltInPresets();
+    const providers = await store.getProviders();
+
+    expect(providers.some((provider) => provider.id === custom.id)).toBe(true);
+  });
+
+  it("serializes concurrent provider updates so none are lost", async () => {
+    const { store } = await createStore();
+    await store.ensureBuiltInPresets();
+
+    // Fire several addProvider + setToken + setActiveProviderId races.
+    const added = await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        store.addProvider({ name: `P${index}`, authType: "anthropic-auth-token" }, `tok-${index}`)
+      )
+    );
+
+    await Promise.all(added.map((provider) => store.setActiveProviderId(provider.id)));
+    const providers = await store.getProviders();
+
+    for (const provider of added) {
+      expect(providers.some((candidate) => candidate.id === provider.id)).toBe(true);
+      expect(await store.getToken(provider.id)).toBeDefined();
+    }
+  });
 });
