@@ -163,7 +163,7 @@ rsi/runs/
 
 Every meta round is archived under `rsi/runs/meta/` (`latest.md`, `latest.json`, plus timestamped copies). The accepted template is **not** written back automatically: use `--apply --yes [--target rsi/prompts/proposer.v1.md]` after reviewing it. The meta-loop changes prompts, not weights or evaluator code. It cannot add tests or change scoring. This is intentional: the optimizer must not be able to redefine success.
 
-The real model run used during development accepted two consecutive shortening rounds on `interval-merge` and `lru-cache` while both tasks stayed at score 1.0 (1784 → 1428 → 1213 characters). A later verification run archived a one-round result at 1784 → 1444 characters (about 19% shorter). This is a genuine scaffold-level improvement that does not require a score gain: the same behavior with a smaller prompt.
+The real model run used during development accepted two consecutive shortening rounds on `interval-merge` and `lru-cache` while both tasks stayed at score 1.0 (1784 → 1428 → 1213 characters). A later verification run archived a one-round result at 1784 → 1443 characters (about 19% shorter). This is a genuine scaffold-level improvement that does not require a score gain: the same behavior with a smaller prompt.
 
 ## Task format
 
