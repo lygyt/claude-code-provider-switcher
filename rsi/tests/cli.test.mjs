@@ -24,11 +24,15 @@ test("CLI list emits machine-readable task metadata", () => {
   assert.deepEqual(
     tasks.map((task) => task.id),
     [
+      "algorithms/aho-corasick",
       "algorithms/dijkstra",
       "algorithms/edit-distance",
       "algorithms/interval-merge",
+      "algorithms/lfu-cache",
       "algorithms/lru-cache",
+      "algorithms/max-flow",
       "algorithms/median-stream",
+      "algorithms/regex-match",
       "algorithms/sliding-window-max",
       "algorithms/top-k-frequent",
       "algorithms/union-find"

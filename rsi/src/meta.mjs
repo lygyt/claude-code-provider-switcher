@@ -3,10 +3,7 @@ import { loadPromptTemplate, renderTemplate } from "./prompts.mjs";
 import { runCommand } from "./evaluator.mjs";
 import { childProcessEnv } from "./provider.mjs";
 import { extractJsonObject, truncate } from "./util.mjs";
-
-function promptFingerprint(template) {
-  return template.length;
-}
+import { withIsolatedDirectory } from "./proposers.mjs";
 
 export function validateMetaPrompt(template) {
   if (typeof template !== "string") {
@@ -48,6 +45,47 @@ function summarizeResults(results) {
   }));
 }
 
+export function metaDecision({
+  previousResults,
+  candidateResults,
+  previousTemplate,
+  candidateTemplate,
+  minDelta = 0.01,
+  maxRegression = 0.03,
+  minCostReduction = 0.1
+}) {
+  const mean = (results) =>
+    results.length ? results.reduce((sum, result) => sum + result.best.score, 0) / results.length : 0;
+  const previousMean = mean(previousResults);
+  const candidateMean = mean(candidateResults);
+  const scoreImproved = candidateMean > previousMean + minDelta;
+  const noLargeRegression = candidateResults.every(
+    (result, index) => result.best.score >= previousResults[index].best.score - maxRegression
+  );
+  const scoreAccepted = scoreImproved && noLargeRegression;
+
+  const promptLengthBefore = previousTemplate.length;
+  const promptLengthAfter = candidateTemplate.length;
+  const costReduction =
+    promptLengthBefore > 0 ? (promptLengthBefore - promptLengthAfter) / promptLengthBefore : 0;
+  const nonInferior =
+    candidateMean >= previousMean - 1e-9 &&
+    candidateResults.every(
+      (result, index) => result.best.score >= previousResults[index].best.score - 1e-9
+    );
+  const costAccepted = nonInferior && costReduction >= minCostReduction;
+
+  return {
+    accepted: scoreAccepted || costAccepted,
+    reason: scoreAccepted ? "score" : costAccepted ? "cost" : "rejected",
+    previousMean,
+    candidateMean,
+    promptLengthBefore,
+    promptLengthAfter,
+    costReduction
+  };
+}
+
 async function evaluateTemplate(template, tasks, proposerFactory, options) {
   const results = [];
   for (const task of tasks) {
@@ -65,12 +103,18 @@ async function evaluateTemplate(template, tasks, proposerFactory, options) {
   return { results, meanScore };
 }
 
-export function buildMetaPrompt(currentTemplate, validationSummary, lessons, metaTemplate) {
+export function buildMetaPrompt(currentTemplate, validationSummary, lessons, metaTemplate, options = {}) {
   if (typeof metaTemplate !== "string" || !metaTemplate.trim()) {
     throw new Error("buildMetaPrompt requires a meta prompt template.");
   }
+  const meanScore = validationSummary.length
+    ? validationSummary.reduce((sum, result) => sum + result.best, 0) / validationSummary.length
+    : 0;
   return renderTemplate(metaTemplate, {
     CURRENT_TEMPLATE: currentTemplate,
+    CURRENT_LENGTH: currentTemplate.length,
+    CURRENT_MEAN: meanScore.toFixed(4),
+    MIN_COST_REDUCTION_PERCENT: Math.round((options.minCostReduction ?? 0.1) * 100),
     VALIDATION_RESULTS: JSON.stringify(validationSummary, null, 2),
     LESSONS: lessons.length ? lessons.map((lesson) => `- ${lesson.lesson}`).join("\n") : "(none)"
   });
@@ -98,31 +142,35 @@ export class CommandMetaProposer {
     this.args = options.args ?? ["-p", "--output-format", "text"];
     this.timeoutMs = options.timeoutMs ?? 300000;
     this.provider = options.provider;
-    this.cwd = options.cwd ?? process.cwd();
+    this.cwd = options.cwd;
   }
 
   async proposeMeta(request) {
-    const result = await runCommand([this.command, ...this.args], {
-      cwd: this.cwd,
-      timeoutMs: this.timeoutMs,
-      env: childProcessEnv(this.provider),
-      input: request.prompt,
-      windowsShell: true
-    });
-    if (result.timedOut) {
-      throw new Error(`Meta proposer timed out after ${this.timeoutMs}ms.`);
-    }
-    if (result.code !== 0) {
-      throw new Error(`Meta proposer exited with ${result.code}: ${truncate(result.stderr || result.stdout, 1200)}`);
-    }
-    const value = extractJsonObject(result.stdout);
-    if (!value || typeof value.prompt !== "string") {
-      throw new Error("Meta proposer did not return a prompt string.");
-    }
-    return {
-      prompt: value.prompt,
-      rationale: typeof value.rationale === "string" ? value.rationale : ""
+    const run = async (cwd) => {
+      const result = await runCommand([this.command, ...this.args], {
+        cwd,
+        timeoutMs: this.timeoutMs,
+        env: childProcessEnv(this.provider),
+        input: request.prompt,
+        windowsShell: true
+      });
+      if (result.timedOut) {
+        throw new Error(`Meta proposer timed out after ${this.timeoutMs}ms.`);
+      }
+      if (result.code !== 0) {
+        throw new Error(`Meta proposer exited with ${result.code}: ${truncate(result.stderr || result.stdout, 1200)}`);
+      }
+      const value = extractJsonObject(result.stdout);
+      if (!value || typeof value.prompt !== "string") {
+        throw new Error("Meta proposer did not return a prompt string.");
+      }
+      return {
+        prompt: value.prompt,
+        rationale: typeof value.rationale === "string" ? value.rationale : ""
+      };
     };
+
+    return this.cwd ? run(this.cwd) : withIsolatedDirectory(run);
   }
 }
 
@@ -134,6 +182,7 @@ export async function runMeta(options) {
     rounds = 2,
     minDelta = 0.01,
     maxRegression = 0.03,
+    minCostReduction = 0.1,
     lessonStore
   } = options;
   if (!tasks?.length) {
@@ -150,7 +199,9 @@ export async function runMeta(options) {
 
   for (let round = 1; round <= rounds; round += 1) {
     const lessons = lessonStore ? await lessonStore.retrieve({ id: "meta", title: "prompt optimization", category: "meta", tags: ["prompt"] }, 8) : [];
-    const prompt = buildMetaPrompt(template, summarizeResults(baseline.results), lessons, metaTemplate);
+    const prompt = buildMetaPrompt(template, summarizeResults(baseline.results), lessons, metaTemplate, {
+      minCostReduction
+    });
     let proposal;
     try {
       proposal = await metaProposer.proposeMeta({
@@ -175,30 +226,38 @@ export async function runMeta(options) {
 
     const previousMean = baseline.meanScore;
     const candidate = await evaluateTemplate(candidateTemplate, tasks, proposerFactory, options);
-    const improved = candidate.meanScore > previousMean + minDelta;
-    const noRegression = candidate.results.every((result, index) => {
-      const previous = baseline.results[index];
-      return result.best.score >= previous.best.score - maxRegression;
+    const decision = metaDecision({
+      previousResults: baseline.results,
+      candidateResults: candidate.results,
+      previousTemplate: template,
+      candidateTemplate,
+      minDelta,
+      maxRegression,
+      minCostReduction
     });
-    const accepted = improved && noRegression;
     history.push({
       round,
-      accepted,
-      before: Number(baseline.meanScore.toFixed(4)),
+      accepted: decision.accepted,
+      reason: decision.reason,
+      before: Number(previousMean.toFixed(4)),
       after: Number(candidate.meanScore.toFixed(4)),
       rationale: proposal.rationale,
-      promptLengthBefore: promptFingerprint(template),
-      promptLengthAfter: promptFingerprint(candidateTemplate)
+      promptLengthBefore: decision.promptLengthBefore,
+      promptLengthAfter: decision.promptLengthAfter,
+      costReduction: Number(decision.costReduction.toFixed(4))
     });
 
-    if (accepted) {
+    if (decision.accepted) {
       template = candidateTemplate;
       baseline = candidate;
       if (lessonStore) {
         await lessonStore.add({
           taskId: "meta",
           tags: ["meta", "prompt"],
-          lesson: proposal.rationale || "Accepted a prompt template that improved validation scores.",
+          lesson:
+            decision.reason === "cost"
+              ? proposal.rationale || "Accepted a shorter prompt template that preserved validation scores."
+              : proposal.rationale || "Accepted a prompt template that improved validation scores.",
           accepted: true,
           scoreDelta: candidate.meanScore - previousMean
         });

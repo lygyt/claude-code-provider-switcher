@@ -329,6 +329,244 @@ export function shortestPaths(n, edges, source) {
 }
 `;
 
+const lfuCache = `export class LFUCache {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.entries = new Map();
+    this.frequencies = new Map();
+    this.minFrequency = 0;
+  }
+
+  bucketFor(frequency) {
+    let bucket = this.frequencies.get(frequency);
+    if (!bucket) {
+      bucket = new Map();
+      this.frequencies.set(frequency, bucket);
+    }
+    return bucket;
+  }
+
+  touch(entry) {
+    const oldFrequency = entry.frequency;
+    const oldBucket = this.frequencies.get(oldFrequency);
+    oldBucket.delete(entry.key);
+    if (oldBucket.size === 0) {
+      this.frequencies.delete(oldFrequency);
+      if (this.minFrequency === oldFrequency) {
+        this.minFrequency = oldFrequency + 1;
+      }
+    }
+    entry.frequency += 1;
+    this.bucketFor(entry.frequency).set(entry.key, entry);
+  }
+
+  get(key) {
+    const entry = this.entries.get(key);
+    if (!entry) {
+      return -1;
+    }
+    this.touch(entry);
+    return entry.value;
+  }
+
+  put(key, value) {
+    if (this.capacity === 0) {
+      return;
+    }
+    const existing = this.entries.get(key);
+    if (existing) {
+      existing.value = value;
+      this.touch(existing);
+      return;
+    }
+    if (this.entries.size >= this.capacity) {
+      const bucket = this.frequencies.get(this.minFrequency);
+      const victimKey = bucket.keys().next().value;
+      bucket.delete(victimKey);
+      this.entries.delete(victimKey);
+      if (bucket.size === 0) {
+        this.frequencies.delete(this.minFrequency);
+      }
+    }
+    const entry = { key, value, frequency: 1 };
+    this.entries.set(key, entry);
+    this.bucketFor(1).set(key, entry);
+    this.minFrequency = 1;
+  }
+}
+`;
+
+const regexMatch = `export function isMatch(text, pattern) {
+  const rows = pattern.length + 1;
+  const columns = text.length + 1;
+  const dp = Array.from({ length: rows }, () => new Array(columns).fill(false));
+  dp[0][0] = true;
+
+  for (let row = 2; row < rows; row += 1) {
+    if (pattern[row - 1] === "*") {
+      dp[row][0] = dp[row - 2][0];
+    }
+  }
+
+  for (let row = 1; row < rows; row += 1) {
+    const token = pattern[row - 1];
+    for (let column = 1; column < columns; column += 1) {
+      if (token === "*") {
+        const previous = pattern[row - 2];
+        dp[row][column] =
+          dp[row - 2][column] ||
+          ((previous === "." || previous === text[column - 1]) && dp[row][column - 1]);
+      } else {
+        dp[row][column] = (token === "." || token === text[column - 1]) && dp[row - 1][column - 1];
+      }
+    }
+  }
+
+  return dp[rows - 1][columns - 1];
+}
+`;
+
+const ahoCorasick = `export function countPatterns(text, patterns) {
+  if (patterns.length === 0) {
+    return [];
+  }
+
+  const children = [new Map()];
+  const failure = [0];
+  const terminals = [[]];
+  const newNode = () => {
+    children.push(new Map());
+    failure.push(0);
+    terminals.push([]);
+    return children.length - 1;
+  };
+
+  for (let patternIndex = 0; patternIndex < patterns.length; patternIndex += 1) {
+    let node = 0;
+    for (const character of patterns[patternIndex]) {
+      let next = children[node].get(character);
+      if (next === undefined) {
+        next = newNode();
+        children[node].set(character, next);
+      }
+      node = next;
+    }
+    terminals[node].push(patternIndex);
+  }
+
+  const queue = [];
+  for (const child of children[0].values()) {
+    failure[child] = 0;
+    queue.push(child);
+  }
+
+  for (let head = 0; head < queue.length; head += 1) {
+    const node = queue[head];
+    for (const [character, child] of children[node]) {
+      let fallback = failure[node];
+      while (fallback !== 0 && !children[fallback].has(character)) {
+        fallback = failure[fallback];
+      }
+      const target = children[fallback].get(character);
+      failure[child] = target === undefined || target === child ? 0 : target;
+      queue.push(child);
+    }
+  }
+
+  const visits = new Array(children.length).fill(0);
+  let state = 0;
+  for (const character of text) {
+    while (state !== 0 && !children[state].has(character)) {
+      state = failure[state];
+    }
+    state = children[state].get(character) ?? 0;
+    visits[state] += 1;
+  }
+
+  for (let index = queue.length - 1; index >= 0; index -= 1) {
+    const node = queue[index];
+    visits[failure[node]] += visits[node];
+  }
+
+  const counts = new Array(patterns.length).fill(0);
+  for (let node = 0; node < children.length; node += 1) {
+    for (const patternIndex of terminals[node]) {
+      counts[patternIndex] += visits[node];
+    }
+  }
+  return counts;
+}
+`;
+
+const maxFlow = `export function maxFlow(n, edges, source, sink) {
+  if (source === sink) {
+    return 0;
+  }
+
+  const graph = Array.from({ length: n }, () => []);
+  const addEdge = (from, to, capacity) => {
+    const forward = { to, capacity, reverse: graph[to].length };
+    const backward = { to: from, capacity: 0, reverse: graph[from].length };
+    graph[from].push(forward);
+    graph[to].push(backward);
+  };
+
+  for (const [from, to, capacity] of edges) {
+    if (from !== to) {
+      addEdge(from, to, capacity);
+    }
+  }
+
+  const level = new Array(n);
+  const work = new Array(n);
+
+  const buildLevels = () => {
+    level.fill(-1);
+    level[source] = 0;
+    const queue = [source];
+    for (let head = 0; head < queue.length; head += 1) {
+      const vertex = queue[head];
+      for (const edge of graph[vertex]) {
+        if (edge.capacity > 0 && level[edge.to] === -1) {
+          level[edge.to] = level[vertex] + 1;
+          queue.push(edge.to);
+        }
+      }
+    }
+    return level[sink] !== -1;
+  };
+
+  const send = (vertex, available) => {
+    if (vertex === sink) {
+      return available;
+    }
+    for (; work[vertex] < graph[vertex].length; work[vertex] += 1) {
+      const edge = graph[vertex][work[vertex]];
+      if (edge.capacity > 0 && level[edge.to] === level[vertex] + 1) {
+        const pushed = send(edge.to, Math.min(available, edge.capacity));
+        if (pushed > 0) {
+          edge.capacity -= pushed;
+          graph[edge.to][edge.reverse].capacity += pushed;
+          return pushed;
+        }
+      }
+    }
+    return 0;
+  };
+
+  let total = 0;
+  while (buildLevels()) {
+    work.fill(0);
+    let pushed = send(source, Number.MAX_SAFE_INTEGER);
+    while (pushed > 0) {
+      total += pushed;
+      pushed = send(source, Number.MAX_SAFE_INTEGER);
+    }
+  }
+  return total;
+}
+`;
+
 export const referenceSolutions = {
   "algorithms/interval-merge": { "solution.js": intervalMerge },
   "algorithms/lru-cache": { "solution.js": lruCache },
@@ -337,7 +575,11 @@ export const referenceSolutions = {
   "algorithms/sliding-window-max": { "solution.js": slidingWindowMax },
   "algorithms/union-find": { "solution.js": unionFind },
   "algorithms/median-stream": { "solution.js": medianStream },
-  "algorithms/dijkstra": { "solution.js": dijkstra }
+  "algorithms/dijkstra": { "solution.js": dijkstra },
+  "algorithms/lfu-cache": { "solution.js": lfuCache },
+  "algorithms/regex-match": { "solution.js": regexMatch },
+  "algorithms/aho-corasick": { "solution.js": ahoCorasick },
+  "algorithms/max-flow": { "solution.js": maxFlow }
 };
 
 export {
@@ -348,5 +590,9 @@ export {
   slidingWindowMax,
   unionFind,
   medianStream,
-  dijkstra
+  dijkstra,
+  lfuCache,
+  regexMatch,
+  ahoCorasick,
+  maxFlow
 };

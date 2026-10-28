@@ -1,6 +1,18 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { runCommand } from "./evaluator.mjs";
 import { childProcessEnv } from "./provider.mjs";
 import { extractJsonObject, truncate } from "./util.mjs";
+
+export async function withIsolatedDirectory(callback) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "rsi-proposal-"));
+  try {
+    return await callback(directory);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {});
+  }
+}
 
 export function parseProposal(text) {
   const value = extractJsonObject(text);
@@ -59,22 +71,29 @@ export class CommandProposer {
   }
 
   async propose(request) {
-    const result = await runCommand([this.command, ...this.args], {
-      cwd: this.cwd ?? process.cwd(),
-      timeoutMs: this.timeoutMs,
-      env: { ...childProcessEnv(this.provider), ...this.extraEnv },
-      input: request.prompt,
-      windowsShell: true
-    });
+    const run = async (cwd) => {
+      const result = await runCommand([this.command, ...this.args], {
+        cwd,
+        timeoutMs: this.timeoutMs,
+        env: { ...childProcessEnv(this.provider), ...this.extraEnv },
+        input: request.prompt,
+        windowsShell: true
+      });
 
-    if (result.timedOut) {
-      throw new Error(`Proposer command timed out after ${this.timeoutMs}ms.`);
-    }
-    if (result.code !== 0) {
-      throw new Error(`Proposer command exited with ${result.code}: ${truncate(result.stderr || result.stdout, 1200)}`);
-    }
+      if (result.timedOut) {
+        throw new Error(`Proposer command timed out after ${this.timeoutMs}ms.`);
+      }
+      if (result.code !== 0) {
+        throw new Error(`Proposer command exited with ${result.code}: ${truncate(result.stderr || result.stdout, 1200)}`);
+      }
 
-    return parseProposal(result.stdout);
+      return parseProposal(result.stdout);
+    };
+
+    // By default the model runs in an empty temporary directory. This keeps the
+    // hidden tests and the rest of the repository out of its reach. An explicit
+    // cwd is still honored for callers that deliberately provide a workspace.
+    return this.cwd ? run(this.cwd) : withIsolatedDirectory(run);
   }
 }
 

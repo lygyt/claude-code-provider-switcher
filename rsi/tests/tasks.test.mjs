@@ -14,7 +14,7 @@ const benchmarksRoot = path.join(rsiRoot, "benchmarks");
 
 test("every benchmark task has a complete, internally consistent definition", async () => {
   const tasks = await listTasks(benchmarksRoot);
-  assert.equal(tasks.length, 8);
+  assert.equal(tasks.length, 12);
   for (const task of tasks) {
     assert.ok(task.prompt.length > 100, `${task.id} prompt is too short`);
     assert.ok(task.editable.length > 0);
@@ -58,7 +58,11 @@ test("the interval-merge baseline fails hidden tests while optimization baseline
     "algorithms/sliding-window-max": { hiddenPassed: 3, hiddenTotal: 3 },
     "algorithms/union-find": { hiddenPassed: 3, hiddenTotal: 3 },
     "algorithms/median-stream": { hiddenPassed: 2, hiddenTotal: 2 },
-    "algorithms/dijkstra": { hiddenPassed: 2, hiddenTotal: 2 }
+    "algorithms/dijkstra": { hiddenPassed: 2, hiddenTotal: 2 },
+    "algorithms/lfu-cache": { hiddenPassed: 3, hiddenTotal: 3 },
+    "algorithms/regex-match": { hiddenPassed: 3, hiddenTotal: 3 },
+    "algorithms/aho-corasick": { hiddenPassed: 3, hiddenTotal: 3 },
+    "algorithms/max-flow": { hiddenPassed: 4, hiddenTotal: 4 }
   };
 
   for (const task of tasks) {

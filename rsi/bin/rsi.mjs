@@ -238,6 +238,47 @@ async function maybeApply(task, result, flags) {
   return applyToTarget(task, result.bestFiles, target);
 }
 
+async function archiveMetaResult(result, runsDir = defaultRunsDir) {
+  const directory = path.join(runsDir, "meta");
+  await fs.mkdir(directory, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const content = result.template.endsWith("\n") ? result.template : `${result.template}\n`;
+  const history = JSON.stringify(
+    { meanScore: result.baseline.meanScore, history: result.history },
+    null,
+    2
+  );
+  const templateFile = path.join(directory, `${stamp}.md`);
+  const historyFile = path.join(directory, `${stamp}.json`);
+  await fs.writeFile(templateFile, content, "utf8");
+  await fs.writeFile(historyFile, `${history}\n`, "utf8");
+  await fs.writeFile(path.join(directory, "latest.md"), content, "utf8");
+  await fs.writeFile(path.join(directory, "latest.json"), `${history}\n`, "utf8");
+  return { templateFile, historyFile };
+}
+
+async function maybeApplyMetaTemplate(result, flags) {
+  if (!flags.apply) {
+    return undefined;
+  }
+  if (!flags.yes) {
+    throw new Error("--apply is human-gated: pass --yes after reviewing the proposed template.");
+  }
+  const target = path.resolve(flags.target ?? path.join(rsiRoot, "prompts", "proposer.v1.md"));
+  let stats;
+  try {
+    stats = await fs.stat(target);
+  } catch {
+    throw new Error(`--target does not exist: ${target}`);
+  }
+  if (stats.isDirectory()) {
+    throw new Error(`--target must be a file, not a directory: ${target}`);
+  }
+  const content = result.template.endsWith("\n") ? result.template : `${result.template}\n`;
+  await fs.writeFile(target, content, "utf8");
+  return target;
+}
+
 async function commandList(flags) {
   const tasks = await listTasks(benchmarksRoot);
   if (flags.json) {
@@ -323,6 +364,9 @@ async function commandSuite(flags) {
 }
 
 async function commandMeta(flags) {
+  if (flags.apply && !flags.yes) {
+    throw new Error("--apply is human-gated: pass --yes after reviewing the proposed template.");
+  }
   const tasks = await selectTasks(flags, { requireSelection: true });
   const proposerKind = flags.proposer ?? "command";
   const factory = await createProposerFactory(proposerKind, flags);
@@ -340,10 +384,12 @@ async function commandMeta(flags) {
     args: metaArgs,
     timeoutMs: numericFlag(flags, "timeout", 300000, 1000, 3600000),
     provider,
-    cwd: process.cwd()
+    cwd: flags["proposer-cwd"] ? path.resolve(flags["proposer-cwd"]) : undefined
   });
   const rounds = numericFlag(flags, "rounds", 2, 1, 10);
   const maxRegression = numericFlag(flags, "max-regression", 0.03, 0, 1);
+  const minCostReduction = numericFlag(flags, "min-cost-reduction", 0.1, 0, 1);
+  const runsDir = flags["archive-dir"] ? path.resolve(flags["archive-dir"]) : defaultRunsDir;
   const result = await runMeta({
     tasks,
     proposerFactory: factory,
@@ -351,11 +397,21 @@ async function commandMeta(flags) {
     rounds,
     maxIterations: numericFlag(flags, "iterations", 2, 1, 50),
     maxRegression,
-    lessonStore: flags["no-archive"] ? undefined : new LessonStore({ file: path.join(defaultRunsDir, "lessons.jsonl") })
+    minCostReduction,
+    lessonStore: flags["no-archive"] ? undefined : new LessonStore({ file: path.join(runsDir, "lessons.jsonl") })
   });
 
+  const archived = flags["no-archive"] ? undefined : await archiveMetaResult(result, runsDir);
+  const appliedTo = await maybeApplyMetaTemplate(result, flags);
+
   if (flags.json) {
-    process.stdout.write(`${JSON.stringify({ history: result.history, meanScore: round(result.baseline.meanScore), template: result.template }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({
+      history: result.history,
+      meanScore: round(result.baseline.meanScore),
+      template: result.template,
+      archived,
+      appliedTo
+    }, null, 2)}\n`);
     return 0;
   }
 
@@ -371,6 +427,12 @@ async function commandMeta(flags) {
     }
   }
   process.stdout.write(`final mean score ${round(result.baseline.meanScore)}\n`);
+  if (archived) {
+    process.stdout.write(`archived template ${archived.templateFile}\n`);
+  }
+  if (appliedTo) {
+    process.stdout.write(`applied template ${appliedTo}\n`);
+  }
   return 0;
 }
 
@@ -466,7 +528,14 @@ Run options:
   --no-archive               Do not write rsi/runs
   --archive-dir <dir>
   --json                     Machine-readable output
-  --apply --target <dir> --yes   Human-gated write of best files
+  --apply --target <dir> --yes       Human-gated write of best files
+  --apply --target <file.md> --yes   Human-gated write of the meta template
+
+Meta options:
+  --rounds <n>               Max meta rounds (default 2)
+  --min-delta <x>            Minimum mean-score gain (default 0.01)
+  --max-regression <x>       Allowed per-task score loss (default 0.03)
+  --min-cost-reduction <x>   Prompt-length reduction accepted without a score gain (default 0.1)
 
 Examples:
   node rsi/bin/rsi.mjs demo

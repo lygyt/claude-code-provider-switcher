@@ -55,11 +55,12 @@ function quoteWindowsArgument(value) {
 function spawnSpec(command, windowsShell) {
   if (windowsShell && process.platform === "win32") {
     // .cmd shims such as npm's `claude.cmd` cannot be launched directly by
-    // CreateProcess. Route through cmd.exe, with every argument quoted.
+    // CreateProcess. Route through cmd.exe, with every argument quoted and the
+    // whole command wrapped so /s strips exactly the outer pair of quotes.
     const line = command.map(quoteWindowsArgument).join(" ");
-    return [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", line]];
+    return [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `"${line}"`], true];
   }
-  return [command[0], command.slice(1)];
+  return [command[0], command.slice(1), false];
 }
 
 function killProcessTree(child) {
@@ -95,11 +96,12 @@ export function runCommand(command, options = {}) {
     let settled = false;
     let killTimer;
 
-    const [spawnCommand, spawnArgs] = spawnSpec(command, windowsShell);
+    const [spawnCommand, spawnArgs, windowsVerbatimArguments] = spawnSpec(command, windowsShell);
     const child = spawn(spawnCommand, spawnArgs, {
       cwd,
       env,
       windowsHide: true,
+      windowsVerbatimArguments,
       shell: false,
       detached: process.platform !== "win32"
     });

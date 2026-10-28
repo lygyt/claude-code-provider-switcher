@@ -16,7 +16,7 @@ npm run rsi:test
 npm run rsi:demo
 ```
 
-`npm run rsi:demo` runs a **scripted reference oracle** over all eight benchmark tasks. It proves that the sandbox, evaluator, acceptance gate, and report writer work end to end. It is not evidence that a model improved itself: the proposals are hard-coded correct solutions.
+`npm run rsi:demo` runs a **scripted reference oracle** over all twelve benchmark tasks. It proves that the sandbox, evaluator, acceptance gate, and report writer work end to end. It is not evidence that a model improved itself: the proposals are hard-coded correct solutions.
 
 A real model run uses the Claude Code CLI:
 
@@ -60,7 +60,7 @@ Common options:
 | `--archive-dir <dir>` | Alternate run archive and lesson store. |
 | `--json` | Machine-readable output on stdout. |
 | `--apply --target <dir> --yes` | Human-gated write of the best files into an existing directory. |
-| `--rounds`, `--max-regression` | Meta-loop controls. |
+| `--rounds`, `--max-regression`, `--min-cost-reduction` | Meta-loop controls. |
 
 `doctor` prints the Node version, benchmark list, config path, and a redacted provider summary. It never prints tokens.
 
@@ -120,7 +120,7 @@ This deliberately forbids trading correctness for speed. The loop stops early wh
 
 ### Hidden tests
 
-Hidden test files are stored in the task directory but are copied into a separate `hidden/` directory inside the sandbox only after the public tests run. The proposer sees aggregate pass/fail counts and the names of failing hidden tests, never their source or inputs. This limits, but does not eliminate, overfitting to the test names.
+Hidden test files are stored in the task directory but are copied into a separate `hidden/` directory inside the sandbox only after the public tests run. The proposer sees aggregate pass/fail counts and the names of failing hidden tests, never their source or inputs. The command proposer also runs in an empty temporary directory by default, so a tool-using model cannot read the repository's `hidden/` directories or evaluator source. Pass `--proposer-cwd <dir>` only when you deliberately want to give it a workspace. This limits, but does not eliminate, overfitting to the test names.
 
 ### Static policy check
 
@@ -159,9 +159,11 @@ rsi/runs/
 2. Ask the meta proposer (`claude -p`, using `rsi/prompts/meta.v1.md`) for a full replacement template in JSON.
 3. Validate length (200–30000 chars) and require every placeholder used by the proposal prompt.
 4. Evaluate the candidate template on the same tasks.
-5. Accept only if mean best score improves by at least `minDelta` and no task regresses by more than `maxRegression` (default 0.03).
+5. Accept if the mean best score improves by at least `minDelta` and no task regresses by more than `maxRegression` (default 0.03). If the validation scores are already saturated, accept a template that is at least `minCostReduction` (default 10%) shorter, provided every task keeps its previous score. Prompt length is a deterministic proxy for proposer input cost.
 
-The meta-loop changes prompts, not weights or evaluator code. It cannot add tests or change scoring. This is intentional: the optimizer must not be able to redefine success.
+Every meta round is archived under `rsi/runs/meta/` (`latest.md`, `latest.json`, plus timestamped copies). The accepted template is **not** written back automatically: use `--apply --yes [--target rsi/prompts/proposer.v1.md]` after reviewing it. The meta-loop changes prompts, not weights or evaluator code. It cannot add tests or change scoring. This is intentional: the optimizer must not be able to redefine success.
+
+The real model run used during development accepted two consecutive shortening rounds on `interval-merge` and `lru-cache` while both tasks stayed at score 1.0 (1784 → 1428 → 1213 characters). A later verification run archived a one-round result at 1784 → 1444 characters (about 19% shorter). This is a genuine scaffold-level improvement that does not require a score gain: the same behavior with a smaller prompt.
 
 ## Task format
 
@@ -210,7 +212,7 @@ Important details:
 - Put `--test-reporter=tap` **before** the test file. Node may otherwise use the spec reporter and the harness will fall back to treating the whole command as one test.
 - Test files import the editable module relative to their own location. Public tests run with the sandbox root as cwd (`tests/public.test.mjs`); hidden tests run with `hidden/` as cwd (`hidden.test.mjs`).
 - Benchmarks print one JSON line with `ms`, `elapsedMs`, or `timeMs`. The harness takes the median of `runs` successful runs.
-- The baseline should be deliberately weak. It can be incorrect (like interval-merge), or correct but algorithmically slow (like the other seven tasks).
+- The baseline should be deliberately weak. It can be incorrect (like interval-merge), or correct but algorithmically slow (like the other eleven tasks).
 - Hidden tests should include seeded randomized cases against an independent reference implementation, not just hand-picked examples.
 
 ## Current benchmark suite
@@ -225,16 +227,24 @@ Important details:
 | `algorithms/union-find` | Unbalanced parent chain, no compression | Path compression plus union by size/rank |
 | `algorithms/median-stream` | Sorts the whole stream on every query | Two balanced heaps give O(log n) updates |
 | `algorithms/dijkstra` | Bellman-Ford relaxation in adversarial edge order | Adjacency list plus binary heap gives O((V+E) log V) |
+| `algorithms/lfu-cache` | Scans every entry on eviction | Frequency buckets with recency-ordered membership give O(1) |
+| `algorithms/regex-match` | Exponential recursive branching | DP over text and pattern positions |
+| `algorithms/aho-corasick` | Checks every pattern at every text position | Trie plus failure links, then aggregate visits |
+| `algorithms/max-flow` | Edmonds-Karp re-scans dead-end decoys on every augmentation | Dinic level graph plus blocking flow |
 
 Scripted-oracle demo result (not a model measurement):
 
 ```text
 task                          baseline   best   delta   hidden
+algorithms/aho-corasick       0.8000    1.0000  0.2000   3/3
 algorithms/dijkstra           0.8000    1.0000  0.2000   2/2
 algorithms/edit-distance      0.8000    1.0000  0.2000   2/2
 algorithms/interval-merge     0.6500    1.0000  0.3500   4/4
-algorithms/lru-cache          0.8595    1.0000  0.1405   3/3
+algorithms/lfu-cache          0.8000    1.0000  0.2000   3/3
+algorithms/lru-cache          0.8810    1.0000  0.1190   3/3
+algorithms/max-flow           0.8000    1.0000  0.2000   4/4
 algorithms/median-stream      0.8000    1.0000  0.2000   2/2
+algorithms/regex-match        0.8000    1.0000  0.2000   3/3
 algorithms/sliding-window-max 0.8000    1.0000  0.2000   3/3
 algorithms/top-k-frequent     0.8000    1.0000  0.2000   2/2
 algorithms/union-find         0.8000    1.0000  0.2000   3/3
