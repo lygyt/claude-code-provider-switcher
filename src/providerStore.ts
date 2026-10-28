@@ -38,7 +38,13 @@ export function getDefaultLegacyTokenFilePath(): string {
 }
 
 export class ProviderStore {
-  private configWriteQueue: Promise<void> = Promise.resolve();
+  /**
+   * Serializes all read-modify-write operations on the config file within this
+   * process. Without it, concurrent commands (webview refresh, select provider,
+   * add provider, ...) race on readConfigFile -> writeConfigFile and the last
+   * writer wins, silently dropping providers.
+   */
+  private configWriteChain: Promise<void> = Promise.resolve();
   private readonly globalState: ProviderStoreStorage["globalState"];
   private readonly secrets: ProviderStoreStorage["secrets"];
   private readonly configFilePath: string;
@@ -96,8 +102,7 @@ export class ProviderStore {
       updatedAt: timestamp
     };
 
-    const providers = await this.getProviders();
-    await this.saveProviders([...providers, provider]);
+    await this.mutateProviders((providers) => [...providers, provider]);
 
     if (token?.trim()) {
       await this.setToken(provider.id, token.trim());
@@ -106,24 +111,59 @@ export class ProviderStore {
     return provider;
   }
 
+  /**
+   * Read-modify-write the provider list atomically (process-wide) so concurrent
+   * addProvider/updateProvider/deleteProvider calls cannot drop each other. The
+   * mutate callback receives the freshest in-memory state and returns the new
+   * list; the result is persisted while still holding the write lock.
+   */
+  private async mutateProviders(
+    mutate: (providers: ProviderProfile[]) => ProviderProfile[]
+  ): Promise<void> {
+    await this.runConfigWrite(async () => {
+      const loaded = await this.loadProviders();
+      const cloned = cloneProviders(mutate(loaded.providers));
+      // Persist the in-memory backup first: if the following file write is
+      // interrupted, ensureBuiltInPresets can still recover from globalState.
+      await this.globalState.update(providersKey, cloned);
+      const legacyActiveProviderId = this.globalState.get<string>(activeProviderIdKey);
+      await this.updateConfigFile(
+        (config) => ({
+          ...config,
+          providers: cloned,
+          activeProviderId: config.activeProviderId ?? legacyActiveProviderId
+        }),
+        { recoverCorruption: true }
+      );
+    });
+  }
+
   public async updateProvider(id: string, draft: ProviderProfileDraft, secretChange: SecretChange): Promise<ProviderProfile> {
-    const providers = await this.getProviders();
-    const index = providers.findIndex((provider) => provider.id === id);
-    if (index === -1) {
-      throw new Error("Provider no longer exists.");
+    let updated: ProviderProfile | undefined;
+
+    await this.mutateProviders((providers) => {
+      const index = providers.findIndex((provider) => provider.id === id);
+      if (index === -1) {
+        throw new Error("Provider no longer exists.");
+      }
+
+      const existing = providers[index];
+      updated = {
+        ...existing,
+        ...sanitizeDraft(draft),
+        id: existing.id,
+        createdAt: existing.createdAt,
+        updatedAt: nowIso()
+      };
+
+      const next = [...providers];
+      next[index] = updated;
+      return next;
+    });
+
+    if (!updated) {
+      throw new Error("Provider update failed.");
     }
-
-    const existing = providers[index];
-    const updated: ProviderProfile = {
-      ...existing,
-      ...sanitizeDraft(draft),
-      id: existing.id,
-      createdAt: existing.createdAt,
-      updatedAt: nowIso()
-    };
-
-    providers[index] = updated;
-    await this.saveProviders(providers);
 
     if (secretChange.kind === "replace") {
       await this.setToken(id, secretChange.token);
@@ -135,9 +175,7 @@ export class ProviderStore {
   }
 
   public async deleteProvider(id: string): Promise<void> {
-    const providers = await this.getProviders();
-    const nextProviders = providers.filter((provider) => provider.id !== id);
-    await this.saveProviders(nextProviders);
+    await this.mutateProviders((providers) => providers.filter((provider) => provider.id !== id));
     await this.deleteToken(id);
 
     const activeProviderId = await this.getActiveProviderId();
@@ -156,14 +194,16 @@ export class ProviderStore {
   }
 
   public async setActiveProviderId(id: string | undefined): Promise<void> {
-    await this.updateConfigFile((config) => {
-      if (id?.trim()) {
-        return { ...config, activeProviderId: id.trim() };
-      }
+    await this.runConfigWrite(async () => {
+      await this.updateConfigFile((config) => {
+        if (id?.trim()) {
+          return { ...config, activeProviderId: id.trim() };
+        }
 
-      const nextConfig = { ...config };
-      delete nextConfig.activeProviderId;
-      return nextConfig;
+        const nextConfig = { ...config };
+        delete nextConfig.activeProviderId;
+        return nextConfig;
+      });
     });
     await this.globalState.update(activeProviderIdKey, id);
   }
@@ -201,13 +241,15 @@ export class ProviderStore {
   }
 
   public async setToken(providerId: string, token: string): Promise<void> {
-    await this.updateConfigFile((config) => ({
-      ...config,
-      tokens: {
-        ...(config.tokens ?? {}),
-        [providerId]: token
-      }
-    }));
+    await this.runConfigWrite(async () => {
+      await this.updateConfigFile((config) => ({
+        ...config,
+        tokens: {
+          ...(config.tokens ?? {}),
+          [providerId]: token
+        }
+      }));
+    });
 
     try {
       await this.secrets.store(secretKey(providerId), token);
@@ -217,10 +259,12 @@ export class ProviderStore {
   }
 
   public async deleteToken(providerId: string): Promise<void> {
-    await this.updateConfigFile((config) => {
-      const tokens = { ...(config.tokens ?? {}) };
-      delete tokens[providerId];
-      return { ...config, tokens };
+    await this.runConfigWrite(async () => {
+      await this.updateConfigFile((config) => {
+        const tokens = { ...(config.tokens ?? {}) };
+        delete tokens[providerId];
+        return { ...config, tokens };
+      });
     });
 
     await this.deleteLegacyToken(providerId);
@@ -237,7 +281,27 @@ export class ProviderStore {
   }
 
   private async loadProviders(): Promise<LoadedProviders> {
-    const config = await this.readConfigFile();
+    let config: ProviderConfigFile;
+    try {
+      config = await this.readConfigFile();
+    } catch (error) {
+      if (!(error instanceof InvalidConfigFileError)) {
+        throw error;
+      }
+
+      // A truncated or half-written config.json must not erase custom
+      // providers. Fall back to the globalState backup that every save writes
+      // first; ensureBuiltInPresets will then repair the file from it.
+      const backup = this.globalState.get<ProviderProfile[]>(providersKey);
+      if (Array.isArray(backup)) {
+        return { providers: cloneProviders(backup), source: "globalState" };
+      }
+
+      // No backup to recover from: keep the original error instead of
+      // silently overwriting whatever the user may still be able to repair.
+      throw error;
+    }
+
     if (Array.isArray(config.providers)) {
       return { providers: cloneProviders(config.providers), source: "config" };
     }
@@ -252,13 +316,34 @@ export class ProviderStore {
 
   private async saveProviders(providers: ProviderProfile[]): Promise<void> {
     const clonedProviders = cloneProviders(providers);
-    const legacyActiveProviderId = this.globalState.get<string>(activeProviderIdKey);
-    await this.updateConfigFile((config) => ({
-      ...config,
-      providers: clonedProviders,
-      activeProviderId: config.activeProviderId ?? legacyActiveProviderId
-    }));
+    // Persist the in-memory backup FIRST. globalState is the durable fallback
+    // if the on-disk write fails or is interrupted.
     await this.globalState.update(providersKey, clonedProviders);
+    await this.runConfigWrite(async () => {
+      const legacyActiveProviderId = this.globalState.get<string>(activeProviderIdKey);
+      await this.updateConfigFile(
+        (config) => ({
+          ...config,
+          providers: clonedProviders,
+          activeProviderId: config.activeProviderId ?? legacyActiveProviderId
+        }),
+        { recoverCorruption: true }
+      );
+    });
+  }
+
+  /**
+   * Run a config read-modify-write operation on the process-wide write queue
+   * so concurrent callers cannot interleave reads and writes and lose data.
+   * Errors are propagated, but the chain is kept regardless of outcome.
+   */
+  private async runConfigWrite<T>(op: () => Promise<T>): Promise<T> {
+    const next = this.configWriteChain.then(op, op);
+    this.configWriteChain = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
   }
 
   private async readConfigFile(): Promise<ProviderConfigFile> {
@@ -280,17 +365,29 @@ export class ProviderStore {
     try {
       return normalizeConfigFile(JSON.parse(stripped));
     } catch {
-      throw new Error("Provider config contains invalid JSON. Fix config.json before saving.");
+      throw new InvalidConfigFileError("Provider config contains invalid JSON. Fix config.json before saving.");
     }
   }
 
-  private async updateConfigFile(update: (config: ProviderConfigFile) => ProviderConfigFile): Promise<void> {
-    const operation = this.configWriteQueue.then(async () => {
-      const config = await this.readConfigFile();
-      await this.writeConfigFile(update(config));
-    });
-    this.configWriteQueue = operation.catch(() => {});
-    await operation;
+  private async updateConfigFile(
+    update: (config: ProviderConfigFile) => ProviderConfigFile,
+    options: { recoverCorruption?: boolean } = {}
+  ): Promise<void> {
+    let config: ProviderConfigFile;
+    try {
+      config = await this.readConfigFile();
+    } catch (error) {
+      if (!options.recoverCorruption || !(error instanceof InvalidConfigFileError)) {
+        throw error;
+      }
+
+      // Recovery is only requested after loadProviders has confirmed that a
+      // globalState backup exists, so starting from an empty file cannot lose
+      // the provider list.
+      config = { version: 1 };
+    }
+
+    await this.writeConfigFile(update(config));
   }
 
   private async writeConfigFile(config: ProviderConfigFile): Promise<void> {
@@ -337,6 +434,13 @@ export class ProviderStore {
     delete tokens[providerId];
     await fs.mkdir(path.dirname(this.legacyTokenFilePath), { recursive: true });
     await fs.writeFile(this.legacyTokenFilePath, `${JSON.stringify(tokens, null, 2)}\n`, "utf8");
+  }
+}
+
+class InvalidConfigFileError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "InvalidConfigFileError";
   }
 }
 

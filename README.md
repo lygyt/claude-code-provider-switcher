@@ -14,6 +14,8 @@ Chat with Claude Code in the extension sidebar using the selected provider. The 
 
 当模型通过 Claude Code 返回思考内容时，侧边栏会实时显示思考卡片；结束后自动折叠，可点击展开，历史对话也能查看已保存的思考。部分模型或 Provider 不返回思考文本，此时会显示等待状态。回复速度受模型和 Provider 影响，可在 Provider 的高级设置中调整思考强度。
 
+同一对话会复用后台 Claude Code 进程，无需每条消息重新启动。切换模型、Provider 或其他影响 CLI 的设置后，下一条消息会重新启动进程并恢复当前会话，继续使用已有上下文；新建对话则开始新的上下文。
+
 工具卡片和聊天交互参考 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的开源前端设计，并针对 VS Code 侧边栏及 Claude Code 事件格式实现。
 
 点击聊天顶部的齿轮设置常用提示词及自动插入位置。输入框内按 **Ctrl+Alt+P**（macOS：**Cmd+Option+P**），或点击输入框下方的加号，可在光标位置插入；也可以选择每次发送时自动添加到消息头部或尾部。自动插入默认关闭。
