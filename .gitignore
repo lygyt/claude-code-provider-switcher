@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output and packaged extensions
+dist/
+out/
+*.vsix
+.vsixmanifest
+
+# Local protocol sandbox and runtime state
+tmp-protocol-config/
+tmp/
+.claude/
+.claude-code-provider-switcher/
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+.npmrc
+*.log
+npm-debug.log*
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
