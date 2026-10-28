@@ -1,0 +1,25 @@
+{
+  "id": "algorithms/interval-merge",
+  "title": "Merge Intervals",
+  "category": "algorithms",
+  "difficulty": 2,
+  "tags": ["sorting", "intervals", "greedy"],
+  "prompt": "prompt.md",
+  "workspace": "workspace",
+  "editable": ["solution.js"],
+  "publicTestsDir": "tests",
+  "hiddenTestsDir": "hidden",
+  "testCommand": ["node", "--test", "--test-reporter=tap", "tests/public.test.mjs"],
+  "hiddenCommand": ["node", "--test", "--test-reporter=tap", "hidden.test.mjs"],
+  "benchmarkFile": "bench.mjs",
+  "benchmark": {
+    "command": ["node", "bench.mjs"],
+    "targetMs": 120,
+    "maxMs": 1000,
+    "runs": 3,
+    "timeoutMs": 20000
+  },
+  "timeoutMs": 30000,
+  "maxFileBytes": 30000,
+  "weights": { "correctness": 0.7, "performance": 0.2, "quality": 0.1 }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "algorithms/lru-cache",
+  "title": "LRU Cache",
+  "category": "algorithms",
+  "difficulty": 3,
+  "tags": ["data-structures", "hash-map", "linked-list", "cache"],
+  "prompt": "prompt.md",
+  "workspace": "workspace",
+  "editable": ["solution.js"],
+  "publicTestsDir": "tests",
+  "hiddenTestsDir": "hidden",
+  "testCommand": ["node", "--test", "--test-reporter=tap", "tests/public.test.mjs"],
+  "hiddenCommand": ["node", "--test", "--test-reporter=tap", "hidden.test.mjs"],
+  "benchmarkFile": "bench.mjs",
+  "benchmark": {
+    "command": ["node", "bench.mjs"],
+    "targetMs": 150,
+    "maxMs": 1200,
+    "runs": 3,
+    "timeoutMs": 15000
+  },
+  "timeoutMs": 30000,
+  "maxFileBytes": 30000,
+  "weights": { "correctness": 0.7, "performance": 0.2, "quality": 0.1 }
+}

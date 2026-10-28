@@ -12,6 +12,8 @@ tmp-protocol-config/
 tmp/
 .claude/
 .claude-code-provider-switcher/
+rsi/runs/
+rsi/.cache/
 
 # Local settings and secrets
 .env

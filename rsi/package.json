@@ -1,0 +1,15 @@
+{
+  "name": "ccps-rsi-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Evaluation-driven recursive self-improvement harness for coding agents.",
+  "scripts": {
+    "test": "node --test tests",
+    "demo": "node examples/demo.mjs",
+    "rsi": "node bin/rsi.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

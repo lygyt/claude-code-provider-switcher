@@ -562,8 +562,11 @@
     "compile": "tsc -p ./ && node scripts/copy-sidebar.cjs",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src test",
-    "test": "npm run compile && vitest run --exclude \"**/*.test.cjs\" && node test/sidebarBackend.test.cjs && node --test test/sidebarChatView.test.cjs",
+    "test": "npm run compile && vitest run --exclude \"**/*.test.cjs\" --exclude \"rsi/**\" && node test/sidebarBackend.test.cjs && node --test test/sidebarChatView.test.cjs",
     "test:watch": "vitest",
+    "rsi": "node rsi/bin/rsi.mjs",
+    "rsi:test": "node --test \"rsi/tests/*.test.mjs\"",
+    "rsi:demo": "node rsi/examples/demo.mjs",
     "package": "vsce package",
     "publish": "vsce publish",
     "vscode:prepublish": "npm run lint && npm run test && npm run compile"

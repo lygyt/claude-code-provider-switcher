@@ -1,0 +1,25 @@
+{
+  "id": "algorithms/median-stream",
+  "title": "Streaming Median",
+  "category": "algorithms",
+  "difficulty": 3,
+  "tags": ["heap", "two-heaps", "data-stream", "data-structures"],
+  "prompt": "prompt.md",
+  "workspace": "workspace",
+  "editable": ["solution.js"],
+  "publicTestsDir": "tests",
+  "hiddenTestsDir": "hidden",
+  "testCommand": ["node", "--test", "--test-reporter=tap", "tests/public.test.mjs"],
+  "hiddenCommand": ["node", "--test", "--test-reporter=tap", "hidden.test.mjs"],
+  "benchmarkFile": "bench.mjs",
+  "benchmark": {
+    "command": ["node", "bench.mjs"],
+    "targetMs": 100,
+    "maxMs": 800,
+    "runs": 2,
+    "timeoutMs": 3000
+  },
+  "timeoutMs": 30000,
+  "maxFileBytes": 30000,
+  "weights": { "correctness": 0.7, "performance": 0.2, "quality": 0.1 }
+}

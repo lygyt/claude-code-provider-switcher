@@ -350,6 +350,24 @@ If Claude Code CLI is not found, install Claude Code and ensure `claude` is avai
 - `Claude Code: Run Workflow`
 - `Claude Code: Refresh Workflows`
 
+## RSI Harness (experimental)
+
+The repository also contains an evaluation-driven self-improvement harness under [`rsi/`](rsi/README.md). It is **scaffold-level RSI**, not weight-level self-modification: the base model stays frozen, while candidate code, prompts, and lessons are improved through sandboxed benchmark evaluation.
+
+The loop runs a proposer (the Claude Code CLI, an Anthropic-compatible HTTP endpoint, or a scripted oracle), applies only allow-listed files inside a temporary sandbox, runs public and hidden tests plus a performance benchmark and static policy check, and accepts a candidate only when its score improves without lowering the hidden pass rate. Accepted lessons and run reports are archived; a separate meta-loop can rewrite the proposer prompt template and keep it only if the validation suite improves.
+
+```bash
+npm run rsi -- list
+npm run rsi:demo
+npm run rsi:test
+node rsi/bin/rsi.mjs run --task interval-merge --proposer command --iterations 3
+node rsi/bin/rsi.mjs meta --tasks interval-merge,lru-cache --rounds 2
+```
+
+`npm run rsi:demo` uses a scripted reference oracle and is only an end-to-end harness check, not evidence that a model improved itself. Real runs require the Claude Code CLI or a configured provider. Writes back to a project are human-gated with `--apply --target <dir> --yes`. Runtime artifacts (`rsi/runs/`) are git-ignored.
+
+`rsi/` 是一个外部脚手架式的递归自我改进实验框架，不会修改模型权重。它通过沙箱基准测试、隐藏测试、性能预算和静态安全检查来筛选候选代码，并用经验教训与提示词元优化积累改进；只有分数提升且隐藏测试通过率不下降的候选才会被接受。写入真实项目需要显式传入 `--apply --target <目录> --yes`。
+
 ## Development
 
 ```bash

@@ -1,0 +1,25 @@
+{
+  "id": "algorithms/top-k-frequent",
+  "title": "Top K Frequent Elements",
+  "category": "algorithms",
+  "difficulty": 2,
+  "tags": ["hash-map", "sorting", "counting"],
+  "prompt": "prompt.md",
+  "workspace": "workspace",
+  "editable": ["solution.js"],
+  "publicTestsDir": "tests",
+  "hiddenTestsDir": "hidden",
+  "testCommand": ["node", "--test", "--test-reporter=tap", "tests/public.test.mjs"],
+  "hiddenCommand": ["node", "--test", "--test-reporter=tap", "hidden.test.mjs"],
+  "benchmarkFile": "bench.mjs",
+  "benchmark": {
+    "command": ["node", "bench.mjs"],
+    "targetMs": 80,
+    "maxMs": 800,
+    "runs": 2,
+    "timeoutMs": 6000
+  },
+  "timeoutMs": 30000,
+  "maxFileBytes": 30000,
+  "weights": { "correctness": 0.7, "performance": 0.2, "quality": 0.1 }
+}

@@ -5,6 +5,7 @@ tmp-protocol-config/**
 src/**
 test/**
 tests/**
+rsi/**
 tmp-protocol-config/**
 dist/test/**
 dist/**/*.map
