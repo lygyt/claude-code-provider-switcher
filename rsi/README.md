@@ -68,7 +68,7 @@ Common options:
 | `--apply --target <dir> --yes` | Human-gated write of the best files into an existing directory. |
 | `--rounds`, `--max-regression`, `--min-cost-reduction` | Meta-loop controls. |
 
-`doctor` prints the Node version, benchmark list, config path, and a redacted provider summary. It never prints tokens. With `--calibrate`, it also measures every selected task's reference solution against itself, runs `--trials` independent trials per task (default 5), and exits 1 if the performance gate would accept identical code.
+`doctor` prints the Node version, benchmark list, config path, and a redacted provider summary. It never prints tokens. With `--calibrate`, it also measures every selected task's archived best (or reference) solution against itself, runs `--trials` independent trials per task (default 5), and exits 1 if the performance gate would accept identical code.
 
 ## Loop architecture
 
@@ -144,9 +144,9 @@ In performance mode the two sides are measured together: `evaluateTask` runs the
 
 ### Benchmark calibration
 
-`doctor --calibrate` measures the reference solution against itself. Each trial runs one interleaved comparison with the performance-mode run count (at least six rounds per side). If that comparison would pass the performance gate, the command runs a second, independent comparison exactly as `runTask` does; a task is `noisy` only when both stages pass, because only then would identical code replace the best.
+`doctor --calibrate` measures a solution against itself. It uses the archived best from `rsi/runs/<task>/best` when every editable file is present, because that is the implementation the performance gate actually holds; otherwise it falls back to the reference solution. Each trial runs one interleaved comparison with the performance-mode run count (at least six rounds per side). If that comparison would pass the performance gate, the command runs a second, independent comparison exactly as `runTask` does; a task is `noisy` only when both stages pass, because only then would identical code replace the best.
 
-The report shows, per task, the number of first-stage and confirmed false acceptances, the median paired ratio, and the mean round-win rate. A healthy workload centers on ratio 1.0 and a 50% win rate. The command exits 1 if any task would accept identical code, so it can gate benchmark changes in CI. Trials are independent but limited: zero confirmed false acceptances in five trials is evidence, not proof.
+The report shows, per task, the number of first-stage and confirmed false acceptances, the median paired ratio, the mean round-win rate, and whether the measured files came from the archive or the reference solution. A healthy workload centers on ratio 1.0 and a 50% win rate. The command exits 1 if any task would accept identical code, so it can gate benchmark changes in CI. Trials are independent but limited: zero confirmed false acceptances in five trials is evidence, not proof.
 
 ### Hidden tests
 

@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -124,6 +125,24 @@ export class RunArchive {
     for (const [relative, content] of Object.entries(files)) {
       await writeText(path.join(this.taskDir(taskId), "best", ...relative.split("/")), content);
     }
+  }
+
+  // Returns the archived best files, or undefined when the archive is
+  // incomplete. Calibration uses this to measure the solution that actually
+  // holds the performance baseline, falling back to the reference solution.
+  async readBest(taskId, editable) {
+    const files = {};
+    for (const relative of editable) {
+      try {
+        files[relative] = await fs.readFile(
+          path.join(this.taskDir(taskId), "best", ...relative.split("/")),
+          "utf8"
+        );
+      } catch {
+        return undefined;
+      }
+    }
+    return files;
   }
 
   async saveReport(taskId, content) {

@@ -88,6 +88,10 @@ test("RunArchive writes iterations, best files, and a report", async () => {
     assert.equal(await readText(path.join(taskDir, "best", "solution.js")), "export const x = 1;\n");
     assert.equal(await readText(path.join(taskDir, "report.md")), "# report\n");
     assert.ok(await pathExists(taskDir));
+    assert.deepEqual(await archive.readBest("algorithms/interval-merge", ["solution.js"]), {
+      "solution.js": "export const x = 1;\n"
+    });
+    assert.equal(await archive.readBest("algorithms/interval-merge", ["missing.js"]), undefined);
   } finally {
     await removeDir(root);
   }

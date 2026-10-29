@@ -523,6 +523,7 @@ async function commandDoctor(flags) {
   } catch (error) {
     providerError = error instanceof Error ? error.message : String(error);
   }
+  const runsDir = flags["archive-dir"] ? path.resolve(flags["archive-dir"]) : defaultRunsDir;
   const report = {
     node: process.version,
     platform: `${process.platform} ${process.arch}`,
@@ -533,7 +534,7 @@ async function commandDoctor(flags) {
     configExists: await pathExists(defaultConfigPath()),
     provider: redactProvider(provider),
     providerError,
-    runsDir: defaultRunsDir
+    runsDir
   };
 
   let calibrationFailure = false;
@@ -542,14 +543,16 @@ async function commandDoctor(flags) {
     const trials = numericFlag(flags, "trials", 5, 1, 100);
     const minSpeedup = numericFlag(flags, "min-speedup", 0.05, 0.01, 1);
     const minSpeedupMs = numericFlag(flags, "min-speedup-ms", 0.5, 0, 10000);
+    const archive = new RunArchive({ root: runsDir });
     report.calibration = [];
     for (const task of selected) {
-      const files = referenceSolutions[task.id];
+      const archived = await archive.readBest(task.id, task.editable);
+      const files = archived ?? referenceSolutions[task.id];
       if (!files) {
         report.calibration.push({
           task: task.id,
           skipped: true,
-          reason: "no reference solution",
+          reason: "no archived best or reference solution",
           trials: 0,
           firstStageAccepts: 0,
           confirmedAccepts: 0,
@@ -560,7 +563,10 @@ async function commandDoctor(flags) {
         continue;
       }
       const result = await calibrateTask(task, files, { trials, minSpeedup, minSpeedupMs });
-      report.calibration.push(calibrateSummary(result));
+      report.calibration.push({
+        ...calibrateSummary(result),
+        source: archived ? "archived-best" : "reference"
+      });
     }
     calibrationFailure = report.calibration.some((row) => row.status === "noisy");
   }
@@ -581,16 +587,16 @@ async function commandDoctor(flags) {
   }
   if (flags.calibrate) {
     process.stdout.write("\nIdentical-code calibration (the paired gate must not accept a speedup):\n");
-    process.stdout.write("task\ttrials\tfirstStage\tconfirmed\tmedianRatio\twinRate\tstatus\n");
+    process.stdout.write("task\ttrials\tfirstStage\tconfirmed\tmedianRatio\twinRate\tsource\tstatus\n");
     for (const row of report.calibration) {
       if (row.skipped) {
-        process.stdout.write(`${row.task}\t-\t-\t-\t-\t-\tskipped (${row.reason})\n`);
+        process.stdout.write(`${row.task}\t-\t-\t-\t-\t-\t-\tskipped (${row.reason})\n`);
         continue;
       }
       const ratio = row.medianPairedRatio === null ? "-" : row.medianPairedRatio.toFixed(3);
       const winRate = row.meanWinRate === null ? "-" : `${Math.round(row.meanWinRate * 100)}%`;
       process.stdout.write(
-        `${row.task}\t${row.trials}\t${row.firstStageAccepts}\t${row.confirmedAccepts}\t${ratio}\t${winRate}\t${row.status}\n`
+        `${row.task}\t${row.trials}\t${row.firstStageAccepts}\t${row.confirmedAccepts}\t${ratio}\t${winRate}\t${row.source}\t${row.status}\n`
       );
     }
     const measured = report.calibration.filter((row) => !row.skipped);
