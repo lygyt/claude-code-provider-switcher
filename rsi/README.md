@@ -62,6 +62,7 @@ Common options:
 | `--min-speedup <n>` | Minimum fractional benchmark reduction for a performance-only win. Default 0.05. |
 | `--min-speedup-ms <ms>` | Minimum absolute benchmark win for a performance-only acceptance. Default 0.5. |
 | `--timeout <ms>` | Proposer timeout. Default 300000. |
+| `--resume` | Start from the archived best for each task instead of the weak workspace, and re-measure it under the current workload. Falls back to the workspace when the archive is absent or invalid. |
 | `--no-archive` | Do not write `rsi/runs/`. |
 | `--archive-dir <dir>` | Alternate run archive and lesson store. |
 | `--json` | Machine-readable output on stdout. |
@@ -180,6 +181,8 @@ rsi/runs/
 ```
 
 `rsi/runs/` and `rsi/.cache/` are git-ignored. Reports contain scores, hidden/public counts, benchmark times, acceptance decisions, and rationales. They do not contain provider tokens.
+
+Pass `--resume` to continue from the archived best rather than the weak workspace. The archived files are validated (editable paths, size, non-empty) and then measured under the current tests and benchmark, so a benchmark recalibration applies to the saved solution too. The report labels the starting point as `Starting score (archived best)` and the CLI JSON adds `startSource: "archive"`. This matters for performance mode: when the weak baseline is too slow to produce a benchmark time (union-find and top-k now time out by design), resuming supplies a real reference in the first iteration instead of deferring all comparison until a candidate has been accepted. If the archive is missing, incomplete, or fails validation, the run logs no error and falls back to the workspace baseline with `startSource: "workspace"`.
 
 ## Meta-loop: prompt template optimization
 

@@ -281,6 +281,74 @@ test("runSuite aggregates multiple tasks with a fresh proposer per task", async 
   assert.ok(suite.aggregate.meanScore >= 0.95);
 });
 
+test("runTask resumes from the archived best instead of the weak workspace", async () => {
+  const task = await findTask(path.join(rsiRoot, "benchmarks"), "interval-merge");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rsi-resume-"));
+  try {
+    const archive = new RunArchive({ root });
+    await archive.saveBest(task.id, referenceSolutions[task.id]);
+    let seenRequest;
+    const proposer = new ScriptedProposer((request) => {
+      seenRequest = request;
+      return { files: referenceSolutions[task.id], rationale: "unchanged", lessons: [] };
+    });
+
+    const result = await runTask(task, {
+      proposer,
+      maxIterations: 1,
+      targetScore: 1.01,
+      archive,
+      resume: true
+    });
+
+    assert.equal(result.startSource, "archive");
+    // The workspace baseline fails half the hidden tests; the archived
+    // reference solution passes all of them.
+    assert.equal(result.baseline.hiddenPassRate, 1);
+    assert.deepEqual(seenRequest.bestFiles, referenceSolutions[task.id]);
+    assert.equal(result.history[0].accepted, false);
+    assert.match(result.report, /Starting score \(archived best\):/);
+  } finally {
+    await removeDir(root);
+  }
+});
+
+test("runTask falls back to the workspace when resume finds no usable archive", async () => {
+  const task = await findTask(path.join(rsiRoot, "benchmarks"), "interval-merge");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rsi-resume-fallback-"));
+  try {
+    const archive = new RunArchive({ root });
+    const proposer = new ScriptedProposer((request) => ({
+      files: request.bestFiles,
+      rationale: "unchanged",
+      lessons: []
+    }));
+
+    const empty = await runTask(task, {
+      proposer,
+      maxIterations: 1,
+      archive,
+      resume: true,
+      measureBaselineBenchmark: false
+    });
+    assert.equal(empty.startSource, "workspace");
+    assert.equal(empty.baseline.hiddenPassRate, 0.5);
+
+    await archive.saveBest(task.id, { "solution.js": "x".repeat(task.maxFileBytes + 1) });
+    const invalid = await runTask(task, {
+      proposer,
+      maxIterations: 0,
+      archive,
+      resume: true,
+      measureBaselineBenchmark: false
+    });
+    assert.equal(invalid.startSource, "workspace");
+    assert.equal(invalid.baseline.hiddenPassRate, 0.5);
+  } finally {
+    await removeDir(root);
+  }
+});
+
 test("listTasks discovers exactly the maintained benchmark suite", async () => {
   const tasks = await listTasks(path.join(rsiRoot, "benchmarks"));
   assert.deepEqual(

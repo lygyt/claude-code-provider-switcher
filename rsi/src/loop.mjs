@@ -9,12 +9,15 @@ function round(value) {
 }
 
 function renderReport(task, result) {
+  const startedFromArchive = result.startSource === "archive";
   const lines = [
     `# RSI report: ${task.title}`,
     "",
     `- Task: \`${task.id}\``,
     `- Category: ${task.category}`,
-    `- Baseline score: ${round(result.baseline.score)}`,
+    startedFromArchive
+      ? `- Starting score (archived best): ${round(result.baseline.score)}`
+      : `- Baseline score: ${round(result.baseline.score)}`,
     `- Best score: ${round(result.best.score)}`,
     `- Accepted iterations: ${result.history.filter((entry) => entry.accepted).length}/${result.history.length}`,
     "",
@@ -154,7 +157,27 @@ export async function runTask(task, options = {}) {
   const lessonStore = options.lessonStore;
   const onProgress = options.onProgress;
 
-  const baselineFiles = await readCurrentEditable(task);
+  // Continuation runs start from the archived best, not the weak workspace.
+  // This preserves work across invocations and, more importantly, gives the
+  // performance gate a real reference immediately: the archived solution is
+  // measured under the current workload before the first proposal. An absent
+  // or invalid archive falls back to the workspace baseline.
+  let baselineFiles;
+  let startSource = "workspace";
+  if (options.resume && archive) {
+    const archivedFiles = await archive.readBest(task.id, task.editable);
+    if (archivedFiles) {
+      try {
+        baselineFiles = validateProposal(task, archivedFiles);
+        startSource = "archive";
+      } catch {
+        baselineFiles = undefined;
+      }
+    }
+  }
+  if (!baselineFiles) {
+    baselineFiles = await readCurrentEditable(task);
+  }
   const baseline = await evaluateTask(task, {
     files: baselineFiles,
     measureBenchmark: options.measureBaselineBenchmark !== false,
@@ -373,7 +396,8 @@ export async function runTask(task, options = {}) {
     best,
     bestFiles,
     history,
-    report: renderReport(task, { baseline, best, bestFiles, history })
+    startSource,
+    report: renderReport(task, { baseline, best, bestFiles, history, startSource })
   };
 
   if (archive) {
@@ -402,6 +426,7 @@ export async function runSuite(tasks, options = {}) {
       meanScore,
       solved: results.filter((result) => result.best.hiddenPassRate >= 0.999).length,
       improved: results.filter((result) => result.best.score > result.baseline.score + 0.01).length,
+      resumed: results.filter((result) => result.startSource === "archive").length,
       performanceImproved: results.filter((result) =>
         result.history.some((entry) => entry.accepted && entry.reason === "performance")
       ).length

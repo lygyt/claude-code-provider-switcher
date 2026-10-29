@@ -26,7 +26,8 @@ const booleanFlags = new Set([
   "help",
   "quiet",
   "optimize-performance",
-  "calibrate"
+  "calibrate",
+  "resume"
 ]);
 
 function parseArgs(argv) {
@@ -203,6 +204,7 @@ function evaluationSummary(evaluation) {
 function resultSummary(result, applied = []) {
   return {
     task: result.task.id,
+    startSource: result.startSource ?? "workspace",
     baseline: evaluationSummary(result.baseline),
     best: evaluationSummary(result.best),
     targetMs: result.task.benchmark?.targetMs ?? null,
@@ -329,6 +331,10 @@ async function commandRun(flags) {
   const minSpeedup = numericFlag(flags, "min-speedup", 0.05, 0.01, 1);
   const minSpeedupMs = numericFlag(flags, "min-speedup-ms", 0.5, 0, 10000);
   const noArchive = Boolean(flags["no-archive"]);
+  const resume = Boolean(flags.resume);
+  if (resume && noArchive) {
+    throw new Error("--resume reads the run archive; remove --no-archive.");
+  }
   const runsDir = flags["archive-dir"] ? path.resolve(flags["archive-dir"]) : defaultRunsDir;
   const archive = noArchive ? undefined : new RunArchive({ root: runsDir });
   const lessonStore = noArchive ? undefined : new LessonStore({ file: path.join(runsDir, "lessons.jsonl") });
@@ -339,6 +345,7 @@ async function commandRun(flags) {
     optimizePerformance,
     minSpeedup,
     minSpeedupMs,
+    resume,
     archive,
     lessonStore,
     onProgress: progressHandler(flags)
@@ -367,6 +374,10 @@ async function commandSuite(flags) {
   const minSpeedup = numericFlag(flags, "min-speedup", 0.05, 0.01, 1);
   const minSpeedupMs = numericFlag(flags, "min-speedup-ms", 0.5, 0, 10000);
   const noArchive = Boolean(flags["no-archive"]);
+  const resume = Boolean(flags.resume);
+  if (resume && noArchive) {
+    throw new Error("--resume reads the run archive; remove --no-archive.");
+  }
   const runsDir = flags["archive-dir"] ? path.resolve(flags["archive-dir"]) : defaultRunsDir;
   const archive = noArchive ? undefined : new RunArchive({ root: runsDir });
   const lessonStore = noArchive ? undefined : new LessonStore({ file: path.join(runsDir, "lessons.jsonl") });
@@ -377,6 +388,7 @@ async function commandSuite(flags) {
     optimizePerformance,
     minSpeedup,
     minSpeedupMs,
+    resume,
     archive,
     lessonStore,
     onProgress: progressHandler(flags)
@@ -630,6 +642,7 @@ Proposer options:
 
 Run options:
   --task <id> / --tasks <id,id>
+  --resume                   Start from the archived best instead of the weak workspace
   --no-archive               Do not write rsi/runs
   --archive-dir <dir>
   --json                     Machine-readable output
@@ -654,7 +667,7 @@ Examples:
   node rsi/bin/rsi.mjs doctor --calibrate --tasks top-k-frequent,union-find
   node rsi/bin/rsi.mjs run --task interval-merge --proposer command --iterations 3
   node rsi/bin/rsi.mjs suite --tasks interval-merge,lru-cache --proposer http --model <model>
-  node rsi/bin/rsi.mjs suite --proposer command --optimize-performance --iterations 3
+  node rsi/bin/rsi.mjs suite --proposer command --resume --optimize-performance --iterations 3
   node rsi/bin/rsi.mjs meta --tasks interval-merge,lru-cache --rounds 2
 `;
 }
