@@ -80,10 +80,32 @@ test("CLI rejects --apply without the explicit human gate", () => {
   assert.match(result.stderr, /human-gated/);
 });
 
+test("CLI performance mode continues after the target score", () => {
+  const result = runCli([
+    "run",
+    "--task",
+    "interval-merge",
+    "--proposer",
+    "reference",
+    "--iterations",
+    "2",
+    "--optimize-performance",
+    "--no-archive",
+    "--json"
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.iterations, 2);
+  assert.ok(output.best.score >= 0.98);
+  assert.ok(output.best.benchMs > 0);
+});
+
 test("CLI help documents the main commands", () => {
   const result = runCli(["--help"]);
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Usage: node rsi\/bin\/rsi\.mjs/);
   assert.match(result.stdout, /meta --tasks/);
   assert.match(result.stdout, /--apply --target/);
+  assert.match(result.stdout, /--optimize-performance/);
+  assert.match(result.stdout, /--min-speedup-ms/);
 });

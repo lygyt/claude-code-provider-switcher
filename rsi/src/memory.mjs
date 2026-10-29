@@ -131,7 +131,12 @@ export class RunArchive {
   }
 }
 
-export function summarizeFailure(evaluation) {
+function formatMs(value) {
+  const number = Number(value);
+  return number < 10 ? Math.round(number * 100) / 100 : Math.round(number);
+}
+
+export function summarizeFailure(evaluation, task, context = {}) {
   const parts = [];
   if (evaluation.error) {
     parts.push(`Evaluation error: ${evaluation.error}`);
@@ -144,6 +149,62 @@ export function summarizeFailure(evaluation) {
   }
   if (evaluation.violations?.length) {
     parts.push(`Policy violations: ${evaluation.violations.join("; ")}`);
+  }
+  if (!evaluation.error && task?.benchmark) {
+    if (!Number.isFinite(evaluation.benchMs)) {
+      parts.push(
+        `Benchmark produced no successful run (target ${task.benchmark.targetMs}ms, max ${task.benchmark.maxMs}ms).`
+      );
+    } else if (Number.isFinite(evaluation.performance) && evaluation.performance < 1) {
+      parts.push(
+        `Benchmark ${Math.round(evaluation.benchMs)}ms misses target ${task.benchmark.targetMs}ms (max ${task.benchmark.maxMs}ms); improve the algorithm.`
+      );
+    } else if (context.optimizePerformance) {
+      const bestMs = context.bestBenchMs;
+      const minSpeedup = Number(context.minSpeedup ?? 0.05);
+      const minSpeedupMs = Math.max(0, Number(context.minSpeedupMs ?? 0.5));
+      const notWorse =
+        (!Number.isFinite(context.bestScore) || evaluation.score >= context.bestScore - 1e-9) &&
+        (!Number.isFinite(context.bestHiddenPassRate) ||
+          evaluation.hiddenPassRate >= context.bestHiddenPassRate - 1e-9);
+      if (notWorse && Number.isFinite(bestMs)) {
+        const relativeRequired = bestMs * (1 - minSpeedup);
+        const absoluteRequired = bestMs - minSpeedupMs;
+        const meetsRelative = evaluation.benchMs < relativeRequired;
+        const meetsAbsolute = evaluation.benchMs <= absoluteRequired + 1e-9;
+        if (!meetsRelative || !meetsAbsolute) {
+          if (bestMs === 0) {
+            parts.push(
+              evaluation.benchMs === 0
+                ? "Benchmark is below timer resolution; performance-only acceptance cannot measure a speedup."
+                : `Benchmark ${formatMs(evaluation.benchMs)}ms is slower than the current best 0ms (below timer resolution).`
+            );
+          } else if (minSpeedupMs > 0 && bestMs < minSpeedupMs) {
+            parts.push(
+              `Current best ${formatMs(bestMs)}ms is below the ${minSpeedupMs}ms minimum measurable win; enlarge the benchmark workload before chasing a performance-only improvement.`
+            );
+          } else if (meetsRelative && !meetsAbsolute) {
+            const deltaMs = Math.round((bestMs - evaluation.benchMs) * 100) / 100;
+            parts.push(
+              `Benchmark ${formatMs(evaluation.benchMs)}ms beats the current best ${formatMs(bestMs)}ms by only ${deltaMs}ms, below the ${minSpeedupMs}ms minimum measurable win; make a larger algorithmic change.`
+            );
+          } else {
+            const roundMs = (value) => Math.round(value * 100) / 100;
+            const thresholds = [
+              `< ${roundMs(relativeRequired)}ms (${Math.round(minSpeedup * 100)}% faster)`
+            ];
+            if (minSpeedupMs > 0 && Math.abs(absoluteRequired - relativeRequired) > 1e-9) {
+              thresholds.push(
+                `< ${roundMs(absoluteRequired)}ms (at least ${minSpeedupMs}ms faster)`
+              );
+            }
+            parts.push(
+              `Benchmark ${formatMs(evaluation.benchMs)}ms misses the performance win over the current best ${formatMs(bestMs)}ms: needs ${thresholds.join(" and ")}; optimize the algorithm or data structures.`
+            );
+          }
+        }
+      }
+    }
   }
   if (!parts.length) {
     parts.push(`No improvement: score ${evaluation.score.toFixed(4)}.`);

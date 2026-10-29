@@ -30,16 +30,46 @@ function renderReport(task, result) {
     const publicResult = evaluation ? `${evaluation.publicResult.passed}/${evaluation.publicResult.total}` : "n/a";
     const bench = evaluation?.benchMs === undefined ? "n/a" : Math.round(evaluation.benchMs);
     const rationale = (entry.rationale || entry.error || "").replace(/\|/g, "\\|").slice(0, 160);
+    const accepted = entry.accepted
+      ? entry.reason === "performance"
+        ? "yes (perf)"
+        : "yes (score)"
+      : "no";
     lines.push(
-      `| ${entry.iteration} | ${evaluation ? round(evaluation.score) : "n/a"} | ${hidden} | ${publicResult} | ${bench} | ${
-        entry.accepted ? "yes" : "no"
-      } | ${rationale} |`
+      `| ${entry.iteration} | ${evaluation ? round(evaluation.score) : "n/a"} | ${hidden} | ${publicResult} | ${bench} | ${accepted} | ${rationale} |`
     );
   }
 
   lines.push("", "## Best metrics", "", "```json", JSON.stringify(summarizeEvaluation(result.best), null, 2), "```", "");
   lines.push("## Best files", "", ...Object.keys(result.bestFiles).map((file) => `- \`${file}\``), "");
   return lines.join("\n");
+}
+
+export function acceptanceDecision({
+  candidate,
+  best,
+  minDelta = 0.01,
+  optimizePerformance = false,
+  minSpeedup = 0.05,
+  minSpeedupMs = 0.5
+}) {
+  const speedup = Math.min(1, Math.max(0, Number(minSpeedup) || 0));
+  const absoluteSpeedup = Math.max(0, Number(minSpeedupMs) || 0);
+  const hiddenNotWorse = candidate.hiddenPassRate >= best.hiddenPassRate - 1e-9;
+  const scoreImproved = candidate.score > best.score + minDelta && hiddenNotWorse;
+  const performanceImproved =
+    Boolean(optimizePerformance) &&
+    hiddenNotWorse &&
+    candidate.score >= best.score - 1e-9 &&
+    Number.isFinite(candidate.benchMs) &&
+    Number.isFinite(best.benchMs) &&
+    candidate.benchMs < best.benchMs * (1 - speedup) &&
+    best.benchMs - candidate.benchMs >= absoluteSpeedup - 1e-9;
+
+  return {
+    accepted: scoreImproved || performanceImproved,
+    reason: scoreImproved ? "score" : performanceImproved ? "performance" : "rejected"
+  };
 }
 
 export async function runTask(task, options = {}) {
@@ -51,6 +81,12 @@ export async function runTask(task, options = {}) {
   const maxIterations = Number(options.maxIterations ?? 3);
   const minDelta = Number(options.minDelta ?? 0.01);
   const targetScore = Number(options.targetScore ?? 0.98);
+  const optimizePerformance = Boolean(options.optimizePerformance && task.benchmark);
+  const minSpeedup = Number(options.minSpeedup ?? 0.05);
+  const minSpeedupMs = Number(options.minSpeedupMs ?? 0.5);
+  const benchmarkRuns = optimizePerformance
+    ? Math.max(5, task.benchmark?.runs ?? 0)
+    : undefined;
   const template = options.promptTemplate ?? (await loadPromptTemplate("proposer.v1.md"));
   const archive = options.archive;
   const lessonStore = options.lessonStore;
@@ -59,7 +95,8 @@ export async function runTask(task, options = {}) {
   const baselineFiles = await readCurrentEditable(task);
   const baseline = await evaluateTask(task, {
     files: baselineFiles,
-    measureBenchmark: options.measureBaselineBenchmark !== false
+    measureBenchmark: options.measureBaselineBenchmark !== false,
+    benchmarkRuns
   });
   let best = baseline;
   let bestFiles = baselineFiles;
@@ -68,7 +105,7 @@ export async function runTask(task, options = {}) {
   const workspaceTree = await walkFiles(task.workspaceDir);
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-    if (best.score >= targetScore) {
+    if (best.score >= targetScore && !optimizePerformance) {
       break;
     }
 
@@ -80,6 +117,9 @@ export async function runTask(task, options = {}) {
       maxIterations,
       bestFiles,
       bestScore: best.score,
+      benchMs: best.benchMs,
+      performance: best.performance,
+      benchmarkRuns: best.benchmarkRuns,
       workspaceTree,
       publicResult: best.publicResult,
       hiddenResult: best.hiddenResult,
@@ -122,15 +162,26 @@ export async function runTask(task, options = {}) {
       continue;
     }
 
-    const candidate = await evaluateTask(task, { files: normalizedFiles });
+    const candidate = await evaluateTask(task, {
+      files: normalizedFiles,
+      benchmarkRuns,
+      measureBenchmark: options.measureBenchmark !== false
+    });
     const previousBestScore = best.score;
-    const accepted =
-      candidate.score > best.score + minDelta &&
-      candidate.hiddenPassRate >= best.hiddenPassRate - 1e-9;
+    const decision = acceptanceDecision({
+      candidate,
+      best,
+      minDelta,
+      optimizePerformance,
+      minSpeedup,
+      minSpeedupMs
+    });
+    const accepted = decision.accepted;
 
     const entry = {
       iteration,
       accepted,
+      reason: decision.reason,
       rationale: proposal.rationale,
       evaluation: candidate,
       lessons: proposal.lessons
@@ -142,7 +193,17 @@ export async function runTask(task, options = {}) {
       bestFiles = normalizedFiles;
       previousFailures = [];
     } else {
-      previousFailures = [...previousFailures, summarizeFailure(candidate)].slice(-5);
+      previousFailures = [
+        ...previousFailures,
+        summarizeFailure(candidate, task, {
+          bestScore: best.score,
+          bestHiddenPassRate: best.hiddenPassRate,
+          bestBenchMs: best.benchMs,
+          optimizePerformance,
+          minSpeedup,
+          minSpeedupMs
+        })
+      ].slice(-5);
     }
 
     if (lessonStore) {
@@ -162,6 +223,7 @@ export async function runTask(task, options = {}) {
       await archive.record(task.id, {
         iteration,
         accepted,
+        reason: decision.reason,
         score: candidate.score,
         previousBest: previousBestScore,
         summary: summarizeEvaluation(candidate),
@@ -172,7 +234,7 @@ export async function runTask(task, options = {}) {
     }
 
     if (onProgress) {
-      onProgress({ iteration, best, accepted, evaluation: candidate });
+      onProgress({ iteration, best, accepted, reason: decision.reason, evaluation: candidate });
     }
   }
 
@@ -210,7 +272,10 @@ export async function runSuite(tasks, options = {}) {
       tasks: results.length,
       meanScore,
       solved: results.filter((result) => result.best.hiddenPassRate >= 0.999).length,
-      improved: results.filter((result) => result.best.score > result.baseline.score + 0.01).length
+      improved: results.filter((result) => result.best.score > result.baseline.score + 0.01).length,
+      performanceImproved: results.filter((result) =>
+        result.history.some((entry) => entry.accepted && entry.reason === "performance")
+      ).length
     }
   };
 }

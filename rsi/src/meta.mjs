@@ -22,6 +22,7 @@ export function validateMetaPrompt(template) {
     "{{EDITABLE_PATHS}}",
     "{{PUBLIC_RESULT}}",
     "{{HIDDEN_SUMMARY}}",
+    "{{BENCHMARK_RESULT}}",
     "{{LESSONS}}",
     "{{PREVIOUS_FAILURES}}",
     "{{ITERATION}}",

@@ -1,7 +1,11 @@
 import { isMatch } from "./workspace/solution.js";
 
-const text = "a".repeat(60);
-const pattern = "a*".repeat(10) + "b";
+// Keep the workload above timer resolution: a rolling DP needs roughly
+// text.length * pattern-token-count cell updates. At 20k characters and 101
+// tokens the reference DP takes tens of milliseconds, while the exponential
+// baseline cannot finish a single run.
+const text = "a".repeat(20000);
+const pattern = "a*".repeat(100) + "b";
 
 const started = performance.now();
 let checksum = 0;

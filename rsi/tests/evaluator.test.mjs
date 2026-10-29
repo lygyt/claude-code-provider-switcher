@@ -139,3 +139,13 @@ test("evaluateTask measures benchmark performance", async () => {
   assert.ok(result.benchMs > 0);
   assert.ok(Math.abs(result.score - 1) < 1e-9);
 });
+
+test("evaluateTask can override the number of benchmark runs", async () => {
+  const task = await loadTask(path.join(rsiRoot, "benchmarks", "algorithms", "top-k-frequent"));
+  const result = await evaluateTask(task, {
+    files: referenceSolutions[task.id],
+    benchmarkRuns: 3
+  });
+  assert.equal(result.benchmarkRuns.length, 3);
+  assert.equal(result.performance, 1);
+});

@@ -14,9 +14,9 @@
   "benchmarkFile": "bench.mjs",
   "benchmark": {
     "command": ["node", "bench.mjs"],
-    "targetMs": 50,
-    "maxMs": 400,
-    "runs": 2,
+    "targetMs": 120,
+    "maxMs": 600,
+    "runs": 3,
     "timeoutMs": 2500
   },
   "timeoutMs": 30000,

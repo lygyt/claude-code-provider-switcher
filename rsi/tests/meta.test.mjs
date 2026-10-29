@@ -46,6 +46,7 @@ test("validateMetaPrompt enforces length and required placeholders", async () =>
   assert.equal(validateMetaPrompt(valid), valid.trim());
   assert.throws(() => validateMetaPrompt("too short"), /too short/);
   assert.throws(() => validateMetaPrompt(valid.replace("{{BEST_SCORE}}", "")), /BEST_SCORE/);
+  assert.throws(() => validateMetaPrompt(valid.replace("{{BENCHMARK_RESULT}}", "")), /BENCHMARK_RESULT/);
   assert.throws(() => validateMetaPrompt(`${valid}\n${"x".repeat(30000)}`), /30000/);
 });
 
@@ -73,14 +74,16 @@ test("runMeta accepts a template only when validation scores improve", async () 
     proposerFactory,
     metaProposer,
     rounds: 1,
-    maxIterations: 1
+    maxIterations: 1,
+    measureBenchmark: false,
+    measureBaselineBenchmark: false
   });
 
   assert.equal(result.history.length, 1);
   assert.equal(result.history[0].accepted, true);
   assert.ok(result.history[0].after > result.history[0].before);
   assert.ok(result.template.includes("MAGIC_MARKER"));
-  assert.ok(Math.abs(result.baseline.meanScore - 1) < 1e-9);
+  assert.ok(Math.abs(result.baseline.meanScore - 0.8) < 1e-9);
 });
 
 test("runMeta accepts a shorter template when every task score is preserved", async () => {
@@ -99,6 +102,8 @@ Public result:
 {{PUBLIC_RESULT}}
 Hidden result:
 {{HIDDEN_SUMMARY}}
+Benchmark:
+{{BENCHMARK_RESULT}}
 Relevant lessons:
 {{LESSONS}}
 Previous failures:
@@ -116,7 +121,9 @@ Write complete files, fix the cited failures, generalize beyond the public tests
     proposerFactory,
     metaProposer,
     rounds: 1,
-    maxIterations: 1
+    maxIterations: 1,
+    measureBenchmark: false,
+    measureBaselineBenchmark: false
   });
 
   assert.equal(result.history.length, 1);
@@ -124,7 +131,7 @@ Write complete files, fix the cited failures, generalize beyond the public tests
   assert.equal(result.history[0].reason, "cost");
   assert.ok(result.history[0].costReduction >= 0.1);
   assert.ok(result.template.includes("COMPACT_MARKER"));
-  assert.ok(Math.abs(result.baseline.meanScore - 1) < 1e-9);
+  assert.ok(Math.abs(result.baseline.meanScore - 0.8) < 1e-9);
 });
 
 test("runMeta rejects malformed templates without changing the current one", async () => {
@@ -139,7 +146,9 @@ test("runMeta rejects malformed templates without changing the current one", asy
     proposerFactory,
     metaProposer,
     rounds: 1,
-    maxIterations: 1
+    maxIterations: 1,
+    measureBenchmark: false,
+    measureBaselineBenchmark: false
   });
 
   assert.equal(result.history.length, 1);

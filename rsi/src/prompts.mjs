@@ -63,6 +63,28 @@ export function formatHiddenSummary(result) {
   }`;
 }
 
+export function formatBenchmarkResult(benchmark, evaluation = {}) {
+  if (!benchmark) {
+    return "(no benchmark)";
+  }
+  const target = benchmark.targetMs ?? "n/a";
+  const max = benchmark.maxMs ?? "n/a";
+  if (!Number.isFinite(evaluation.benchMs)) {
+    return `Benchmark: no successful run (target ${target}ms, max ${max}ms).`;
+  }
+  const milliseconds = Math.round(evaluation.benchMs);
+  const runs =
+    Array.isArray(evaluation.benchmarkRuns) && evaluation.benchmarkRuns.length
+      ? `; runs [${evaluation.benchmarkRuns.map((run) => Math.round(run)).join(", ")}] ms`
+      : "";
+  const performance = Number.isFinite(evaluation.performance)
+    ? evaluation.performance.toFixed(3)
+    : "n/a";
+  return `Benchmark: ${milliseconds}ms median${runs}; target ${target}ms, max ${max}ms; ${
+    evaluation.benchMs <= target ? "target met" : "misses target"
+  }; performance score ${performance}. Lower median time is better when correctness is equal.`;
+}
+
 export function buildProposalPrompt(task, request, template) {
   return renderTemplate(template, {
     TASK_ID: task.id,
@@ -73,6 +95,11 @@ export function buildProposalPrompt(task, request, template) {
     WORKSPACE_TREE: request.workspaceTree.map((file) => `- ${file}`).join("\n"),
     PUBLIC_RESULT: formatPublicResult(request.publicResult),
     HIDDEN_SUMMARY: formatHiddenSummary(request.hiddenResult),
+    BENCHMARK_RESULT: formatBenchmarkResult(task.benchmark, {
+      benchMs: request.benchMs,
+      performance: request.performance,
+      benchmarkRuns: request.benchmarkRuns
+    }),
     LESSONS: formatLessons(request.lessons ?? []),
     PREVIOUS_FAILURES: request.previousFailures?.length
       ? request.previousFailures.map((failure) => `- ${failure}`).join("\n")

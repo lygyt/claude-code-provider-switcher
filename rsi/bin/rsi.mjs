@@ -23,7 +23,8 @@ const booleanFlags = new Set([
   "apply",
   "no-archive",
   "help",
-  "quiet"
+  "quiet",
+  "optimize-performance"
 ]);
 
 function parseArgs(argv) {
@@ -184,10 +185,11 @@ function progressHandler(flags) {
       return;
     }
     const summary = summarizeEvaluation(evaluation);
+    const status = progress.accepted
+      ? `accepted (${progress.reason ?? "score"})`
+      : "rejected";
     process.stderr.write(
-      `iteration ${progress.iteration}: score ${summary.score} hidden ${summary.hidden} public ${summary.public} bench ${summary.benchMs ?? "n/a"}ms ${
-        progress.accepted ? "accepted" : "rejected"
-      }\n`
+      `iteration ${progress.iteration}: score ${summary.score} hidden ${summary.hidden} public ${summary.public} bench ${summary.benchMs ?? "n/a"}ms ${status}\n`
     );
   };
 }
@@ -201,14 +203,21 @@ function resultSummary(result, applied = []) {
     task: result.task.id,
     baseline: evaluationSummary(result.baseline),
     best: evaluationSummary(result.best),
+    targetMs: result.task.benchmark?.targetMs ?? null,
+    maxMs: result.task.benchmark?.maxMs ?? null,
     acceptedIterations: result.history.filter((entry) => entry.accepted).length,
+    performanceIterations: result.history.filter(
+      (entry) => entry.accepted && entry.reason === "performance"
+    ).length,
     iterations: result.history.length,
     bestFiles: Object.keys(result.bestFiles),
     applied,
     history: result.history.map((entry) => ({
       iteration: entry.iteration,
       accepted: entry.accepted,
+      reason: entry.reason ?? null,
       score: entry.evaluation ? round(entry.evaluation.score) : null,
+      benchMs: entry.evaluation?.benchMs === undefined ? null : Math.round(entry.evaluation.benchMs),
       error: entry.error,
       rationale: entry.rationale
     }))
@@ -300,6 +309,9 @@ async function commandRun(flags) {
   const factory = await createProposerFactory(proposerKind, flags);
   const maxIterations = numericFlag(flags, "iterations", 3, 1, 50);
   const minDelta = numericFlag(flags, "min-delta", 0.01, 0, 1);
+  const optimizePerformance = Boolean(flags["optimize-performance"]);
+  const minSpeedup = numericFlag(flags, "min-speedup", 0.05, 0.01, 1);
+  const minSpeedupMs = numericFlag(flags, "min-speedup-ms", 0.5, 0, 10000);
   const noArchive = Boolean(flags["no-archive"]);
   const runsDir = flags["archive-dir"] ? path.resolve(flags["archive-dir"]) : defaultRunsDir;
   const archive = noArchive ? undefined : new RunArchive({ root: runsDir });
@@ -308,6 +320,9 @@ async function commandRun(flags) {
     proposer: await factory(task),
     maxIterations,
     minDelta,
+    optimizePerformance,
+    minSpeedup,
+    minSpeedupMs,
     archive,
     lessonStore,
     onProgress: progressHandler(flags)
@@ -332,6 +347,9 @@ async function commandSuite(flags) {
   const factory = await createProposerFactory(proposerKind, flags);
   const maxIterations = numericFlag(flags, "iterations", 3, 1, 50);
   const minDelta = numericFlag(flags, "min-delta", 0.01, 0, 1);
+  const optimizePerformance = Boolean(flags["optimize-performance"]);
+  const minSpeedup = numericFlag(flags, "min-speedup", 0.05, 0.01, 1);
+  const minSpeedupMs = numericFlag(flags, "min-speedup-ms", 0.5, 0, 10000);
   const noArchive = Boolean(flags["no-archive"]);
   const runsDir = flags["archive-dir"] ? path.resolve(flags["archive-dir"]) : defaultRunsDir;
   const archive = noArchive ? undefined : new RunArchive({ root: runsDir });
@@ -340,6 +358,9 @@ async function commandSuite(flags) {
     proposerFactory: factory,
     maxIterations,
     minDelta,
+    optimizePerformance,
+    minSpeedup,
+    minSpeedupMs,
     archive,
     lessonStore,
     onProgress: progressHandler(flags)
@@ -351,14 +372,18 @@ async function commandSuite(flags) {
     return 0;
   }
 
-  process.stdout.write("task\tbaseline\tbest\thidden\taccepted\n");
+  process.stdout.write("task\tbaseline\tbest\thidden\tbaselineMs\tbestMs\ttargetMs\taccepted\tperf\n");
   for (const summary of summaries) {
     process.stdout.write(
-      `${summary.task}\t${summary.baseline.score}\t${summary.best.score}\t${summary.best.hidden}\t${summary.acceptedIterations}/${summary.iterations}\n`
+      `${summary.task}\t${summary.baseline.score}\t${summary.best.score}\t${summary.best.hidden}\t${
+        summary.baseline.benchMs ?? "-"
+      }\t${summary.best.benchMs ?? "-"}\t${summary.targetMs ?? "-"}\t${summary.acceptedIterations}/${
+        summary.iterations
+      }\t${summary.performanceIterations}\n`
     );
   }
   process.stdout.write(
-    `mean best score ${round(suite.aggregate.meanScore)} over ${suite.aggregate.tasks} tasks; solved ${suite.aggregate.solved}; improved ${suite.aggregate.improved}\n`
+    `mean best score ${round(suite.aggregate.meanScore)} over ${suite.aggregate.tasks} tasks; solved ${suite.aggregate.solved}; improved ${suite.aggregate.improved}; performance-optimized ${suite.aggregate.performanceImproved}\n`
   );
   return 0;
 }
@@ -456,10 +481,16 @@ async function commandDemo(flags) {
 
   process.stdout.write("Scripted-oracle demo: this validates the evaluation loop end to end.\n");
   process.stdout.write("It is not a measurement of model self-improvement.\n\n");
-  process.stdout.write("task\tbaseline\tbest\tdelta\thidden\n");
+  process.stdout.write("task\tbaseline\tbest\tdelta\thidden\tbaselineMs\tbestMs\ttargetMs\n");
   for (const result of suite.results) {
     process.stdout.write(
-      `${result.task.id}\t${round(result.baseline.score)}\t${round(result.best.score)}\t${round(result.best.score - result.baseline.score)}\t${result.best.hiddenResult.passed}/${result.best.hiddenResult.total}\n`
+      `${result.task.id}\t${round(result.baseline.score)}\t${round(result.best.score)}\t${round(
+        result.best.score - result.baseline.score
+      )}\t${result.best.hiddenResult.passed}/${result.best.hiddenResult.total}\t${
+        result.baseline.benchMs === undefined ? "-" : Math.round(result.baseline.benchMs)
+      }\t${result.best.benchMs === undefined ? "-" : Math.round(result.best.benchMs)}\t${
+        result.task.benchmark?.targetMs ?? "-"
+      }\n`
     );
   }
   const solved = suite.results.every((result) => result.best.hiddenResult.passed === result.best.hiddenResult.total);
@@ -522,6 +553,9 @@ Proposer options:
   --model <name>             Model override
   --iterations <n>           Max proposal iterations (default 3)
   --timeout <ms>             Proposer timeout (default 300000)
+  --optimize-performance     Continue after the target score and accept equal-score speedups
+  --min-speedup <x>          Minimum benchmark reduction for a performance-only win (default 0.05)
+  --min-speedup-ms <ms>      Minimum absolute benchmark win for a performance-only acceptance (default 0.5)
 
 Run options:
   --task <id> / --tasks <id,id>
@@ -541,6 +575,7 @@ Examples:
   node rsi/bin/rsi.mjs demo
   node rsi/bin/rsi.mjs run --task interval-merge --proposer command --iterations 3
   node rsi/bin/rsi.mjs suite --tasks interval-merge,lru-cache --proposer http --model <model>
+  node rsi/bin/rsi.mjs suite --proposer command --optimize-performance --iterations 3
   node rsi/bin/rsi.mjs meta --tasks interval-merge,lru-cache --rounds 2
 `;
 }

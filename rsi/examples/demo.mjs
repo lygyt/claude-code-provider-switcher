@@ -29,12 +29,16 @@ const suite = await runSuite(tasks, {
 
 console.log("Scripted-oracle demo: this validates the evaluation loop end to end.");
 console.log("It is not a measurement of model self-improvement.\n");
-console.log("task\tbaseline\tbest\tdelta\thidden");
+console.log("task\tbaseline\tbest\tdelta\thidden\tbaselineMs\tbestMs\ttargetMs");
 for (const result of suite.results) {
   console.log(
     `${result.task.id}\t${round(result.baseline.score)}\t${round(result.best.score)}\t${round(
       result.best.score - result.baseline.score
-    )}\t${result.best.hiddenResult.passed}/${result.best.hiddenResult.total}`
+    )}\t${result.best.hiddenResult.passed}/${result.best.hiddenResult.total}\t${
+      result.baseline.benchMs === undefined ? "-" : Math.round(result.baseline.benchMs)
+    }\t${result.best.benchMs === undefined ? "-" : Math.round(result.best.benchMs)}\t${
+      result.task.benchmark?.targetMs ?? "-"
+    }`
   );
 }
 console.log(`\nmean best score ${round(suite.aggregate.meanScore)}`);

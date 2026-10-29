@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTask, listTasks } from "../src/task.mjs";
-import { runSuite, runTask } from "../src/loop.mjs";
+import { acceptanceDecision, runSuite, runTask } from "../src/loop.mjs";
 import { ScriptedProposer } from "../src/proposers.mjs";
 import { LessonStore, RunArchive } from "../src/memory.mjs";
 import { readCurrentEditable } from "../src/workspace.mjs";
@@ -84,6 +84,91 @@ test("runTask records proposer errors and can recover on the next iteration", as
   assert.equal(result.history[0].accepted, false);
   assert.equal(result.history[1].accepted, true);
   assert.equal(result.best.hiddenPassRate, 1);
+});
+
+test("acceptanceDecision allows faster equal-score candidates only in performance mode", () => {
+  const best = { score: 1, hiddenPassRate: 1, benchMs: 100 };
+  const faster = { score: 1, hiddenPassRate: 1, benchMs: 90 };
+
+  assert.deepEqual(acceptanceDecision({ candidate: faster, best }), {
+    accepted: false,
+    reason: "rejected"
+  });
+  assert.deepEqual(acceptanceDecision({ candidate: faster, best, optimizePerformance: true }), {
+    accepted: true,
+    reason: "performance"
+  });
+  assert.equal(
+    acceptanceDecision({ candidate: { ...faster, benchMs: 96 }, best, optimizePerformance: true }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({ candidate: { ...faster, hiddenPassRate: 0.9 }, best, optimizePerformance: true }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({ candidate: { ...faster, score: 0.99 }, best, optimizePerformance: true }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: { score: 1, hiddenPassRate: 1, benchMs: 9.4 },
+      best: { score: 1, hiddenPassRate: 1, benchMs: 10 },
+      optimizePerformance: true
+    }).accepted,
+    true
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: { score: 1, hiddenPassRate: 1, benchMs: 3.7 },
+      best: { score: 1, hiddenPassRate: 1, benchMs: 4 },
+      optimizePerformance: true
+    }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: { score: 1, hiddenPassRate: 1, benchMs: 3.4 },
+      best: { score: 1, hiddenPassRate: 1, benchMs: 4 },
+      optimizePerformance: true
+    }).accepted,
+    true
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: { score: 1, hiddenPassRate: 1, benchMs: 0 },
+      best: { score: 1, hiddenPassRate: 1, benchMs: 0.3 },
+      optimizePerformance: true
+    }).accepted,
+    false
+  );
+  assert.deepEqual(
+    acceptanceDecision({
+      candidate: { score: 0.95, hiddenPassRate: 1, benchMs: 100 },
+      best: { score: 0.8, hiddenPassRate: 1, benchMs: 100 }
+    }),
+    { accepted: true, reason: "score" }
+  );
+});
+
+test("runTask keeps iterating after the target score in performance mode", async () => {
+  const task = await findTask(path.join(rsiRoot, "benchmarks"), "interval-merge");
+  const proposer = new ScriptedProposer(() => ({
+    files: referenceSolutions[task.id],
+    rationale: "reference",
+    lessons: []
+  }));
+  const result = await runTask(task, {
+    proposer,
+    maxIterations: 2,
+    optimizePerformance: true
+  });
+
+  assert.equal(result.history.length, 2);
+  assert.equal(result.history[0].accepted, true);
+  assert.equal(result.history[0].reason, "score");
+  assert.equal(result.best.hiddenPassRate, 1);
+  assert.ok(Math.abs(result.best.score - 1) < 1e-9);
 });
 
 test("runSuite aggregates multiple tasks with a fresh proposer per task", async () => {

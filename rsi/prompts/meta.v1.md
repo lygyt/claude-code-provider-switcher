@@ -5,7 +5,8 @@ Your job is to improve the proposer prompt template, not the task solutions. The
 ## Hard rules
 
 - Return ONLY JSON: `{"prompt":"<full replacement template>","rationale":"<short reason>"}`.
-- The new template must preserve all of these placeholders: `{{TASK_PROMPT}}`, `{{BEST_FILES}}`, `{{EDITABLE_PATHS}}`, `{{PUBLIC_RESULT}}`, `{{HIDDEN_SUMMARY}}`, `{{LESSONS}}`, `{{PREVIOUS_FAILURES}}`, `{{ITERATION}}`, `{{MAX_ITERATIONS}}`, `{{BEST_SCORE}}`.
+- The new template must preserve all of these placeholders: `{{TASK_PROMPT}}`, `{{BEST_FILES}}`, `{{EDITABLE_PATHS}}`, `{{PUBLIC_RESULT}}`, `{{HIDDEN_SUMMARY}}`, `{{BENCHMARK_RESULT}}`, `{{LESSONS}}`, `{{PREVIOUS_FAILURES}}`, `{{ITERATION}}`, `{{MAX_ITERATIONS}}`, `{{BEST_SCORE}}`.
+- Keep the benchmark feedback instruction: the proposer needs the measured median time and the target so it can improve performance, not just correctness.
 - Do not change task definitions, tests, evaluator code, or scoring weights.
 - Do not ask the agent to read hidden tests, inspect the evaluator, hard-code test inputs, or otherwise game the evaluation.
 - Prefer concrete process instructions: restate constraints, require a plan before coding, require checking edge cases, require complexity analysis, require a self-review pass, require the final answer to be complete files.

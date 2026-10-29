@@ -106,4 +106,107 @@ test("summarizeFailure combines all diagnostic channels", () => {
   assert.match(message, /public alpha/);
   assert.match(message, /eval/);
   assert.match(summarizeFailure({ score: 0.5, hiddenResult: {}, publicResult: {} }), /No improvement/);
+
+  const task = { benchmark: { targetMs: 50, maxMs: 500 } };
+  assert.match(
+    summarizeFailure(
+      { score: 0.8, hiddenResult: {}, publicResult: {}, benchMs: 120, performance: 0.7 },
+      task
+    ),
+    /120ms misses target 50ms/
+  );
+  assert.match(
+    summarizeFailure({ score: 0.8, hiddenResult: {}, publicResult: {}, performance: 0 }, task),
+    /no successful run/
+  );
+
+  const performanceContext = {
+    optimizePerformance: true,
+    minSpeedup: 0.05,
+    bestBenchMs: 100,
+    bestScore: 1,
+    bestHiddenPassRate: 1
+  };
+  const tooSlow = summarizeFailure(
+    {
+      score: 1,
+      hiddenPassRate: 1,
+      benchMs: 96,
+      performance: 1,
+      hiddenResult: {},
+      publicResult: {},
+      violations: []
+    },
+    task,
+    performanceContext
+  );
+  assert.match(tooSlow, /96ms misses the performance win/);
+  assert.match(tooSlow, /current best 100ms/);
+  assert.match(tooSlow, /needs < 95ms \(5% faster\)/);
+
+  assert.match(
+    summarizeFailure(
+      {
+        score: 1,
+        hiddenPassRate: 1,
+        benchMs: 3.7,
+        performance: 1,
+        hiddenResult: {},
+        publicResult: {},
+        violations: []
+      },
+      task,
+      { ...performanceContext, bestBenchMs: 4 }
+    ),
+    /by only 0\.3ms, below the 0\.5ms minimum measurable win/
+  );
+
+  assert.match(
+    summarizeFailure(
+      {
+        score: 1,
+        hiddenPassRate: 1,
+        benchMs: 0.1,
+        performance: 1,
+        hiddenResult: {},
+        publicResult: {},
+        violations: []
+      },
+      task,
+      { ...performanceContext, bestBenchMs: 0.3 }
+    ),
+    /below the 0\.5ms minimum measurable win/
+  );
+
+  const correctnessFirst = summarizeFailure(
+    {
+      score: 0.8,
+      hiddenPassRate: 0.5,
+      benchMs: 96,
+      performance: 1,
+      hiddenResult: {},
+      publicResult: {},
+      violations: []
+    },
+    task,
+    performanceContext
+  );
+  assert.doesNotMatch(correctnessFirst, /not at least/);
+
+  assert.match(
+    summarizeFailure(
+      {
+        score: 1,
+        hiddenPassRate: 1,
+        benchMs: 0,
+        performance: 1,
+        hiddenResult: {},
+        publicResult: {},
+        violations: []
+      },
+      task,
+      { ...performanceContext, bestBenchMs: 0 }
+    ),
+    /below timer resolution/
+  );
 });

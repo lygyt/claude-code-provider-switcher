@@ -567,6 +567,7 @@
     "rsi": "node rsi/bin/rsi.mjs",
     "rsi:test": "node --test \"rsi/tests/*.test.mjs\"",
     "rsi:demo": "node rsi/examples/demo.mjs",
+    "rsi:measure": "node rsi/examples/measure-best.mjs --runs 10",
     "package": "vsce package",
     "publish": "vsce publish",
     "vscode:prepublish": "npm run lint && npm run test && npm run compile"

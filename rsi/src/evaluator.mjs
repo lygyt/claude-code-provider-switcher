@@ -281,14 +281,18 @@ function performanceScore(benchmark, benchMs) {
   return clamp((benchmark.maxMs - benchMs) / (benchmark.maxMs - benchmark.targetMs), 0, 1);
 }
 
-async function runBenchmark(task, sandbox) {
+async function runBenchmark(task, sandbox, runsOverride) {
   if (!task.benchmark) {
     return { runs: [], benchMs: undefined, score: 0 };
   }
 
   const runs = [];
+  const requestedRuns = Number(runsOverride ?? task.benchmark.runs);
+  const runCount = Number.isFinite(requestedRuns)
+    ? Math.max(1, Math.floor(requestedRuns))
+    : task.benchmark.runs;
   const timeoutMs = task.benchmark.timeoutMs ?? task.timeoutMs;
-  for (let index = 0; index < task.benchmark.runs; index += 1) {
+  for (let index = 0; index < runCount; index += 1) {
     const result = await runCommand(task.benchmark.command, {
       cwd: sandbox.root,
       timeoutMs,
@@ -355,7 +359,7 @@ export async function evaluateTask(task, options = {}) {
 
     const benchmark = options.measureBenchmark === false
       ? { runs: [], benchMs: undefined, score: 0 }
-      : await runBenchmark(task, sandbox);
+      : await runBenchmark(task, sandbox, options.benchmarkRuns);
 
     const hiddenPassRate = hiddenResult.total ? hiddenResult.passed / hiddenResult.total : 0;
     const publicPassRate = publicResult.total ? publicResult.passed / publicResult.total : 0;
