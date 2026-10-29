@@ -9,6 +9,7 @@ import { CommandProposer, HttpProposer, ScriptedProposer } from "../src/proposer
 import { LessonStore, RunArchive, defaultRunsDir } from "../src/memory.mjs";
 import { defaultConfigPath, loadProvider, redactProvider } from "../src/provider.mjs";
 import { applyToTarget } from "../src/workspace.mjs";
+import { calibrateSummary, calibrateTask } from "../src/calibrate.mjs";
 import { summarizeEvaluation } from "../src/evaluator.mjs";
 import { pathExists } from "../src/util.mjs";
 import { referenceSolutions } from "../benchmarks/reference-solutions.mjs";
@@ -24,7 +25,8 @@ const booleanFlags = new Set([
   "no-archive",
   "help",
   "quiet",
-  "optimize-performance"
+  "optimize-performance",
+  "calibrate"
 ]);
 
 function parseArgs(argv) {
@@ -533,9 +535,39 @@ async function commandDoctor(flags) {
     providerError,
     runsDir: defaultRunsDir
   };
+
+  let calibrationFailure = false;
+  if (flags.calibrate) {
+    const selected = await selectTasks(flags);
+    const trials = numericFlag(flags, "trials", 5, 1, 100);
+    const minSpeedup = numericFlag(flags, "min-speedup", 0.05, 0.01, 1);
+    const minSpeedupMs = numericFlag(flags, "min-speedup-ms", 0.5, 0, 10000);
+    report.calibration = [];
+    for (const task of selected) {
+      const files = referenceSolutions[task.id];
+      if (!files) {
+        report.calibration.push({
+          task: task.id,
+          skipped: true,
+          reason: "no reference solution",
+          trials: 0,
+          firstStageAccepts: 0,
+          confirmedAccepts: 0,
+          medianPairedRatio: null,
+          meanWinRate: null,
+          status: "skipped"
+        });
+        continue;
+      }
+      const result = await calibrateTask(task, files, { trials, minSpeedup, minSpeedupMs });
+      report.calibration.push(calibrateSummary(result));
+    }
+    calibrationFailure = report.calibration.some((row) => row.status === "noisy");
+  }
+
   if (flags.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-    return providerError ? 1 : 0;
+    return providerError || calibrationFailure ? 1 : 0;
   }
   process.stdout.write(`Node: ${report.node} (${report.platform})\n`);
   process.stdout.write(`Tasks: ${report.benchmarks} (${report.tasks.join(", ")})\n`);
@@ -547,7 +579,25 @@ async function commandDoctor(flags) {
   } else {
     process.stdout.write("Provider: none configured (environment fallback may apply)\n");
   }
-  return providerError ? 1 : 0;
+  if (flags.calibrate) {
+    process.stdout.write("\nIdentical-code calibration (the paired gate must not accept a speedup):\n");
+    process.stdout.write("task\ttrials\tfirstStage\tconfirmed\tmedianRatio\twinRate\tstatus\n");
+    for (const row of report.calibration) {
+      if (row.skipped) {
+        process.stdout.write(`${row.task}\t-\t-\t-\t-\t-\tskipped (${row.reason})\n`);
+        continue;
+      }
+      const ratio = row.medianPairedRatio === null ? "-" : row.medianPairedRatio.toFixed(3);
+      const winRate = row.meanWinRate === null ? "-" : `${Math.round(row.meanWinRate * 100)}%`;
+      process.stdout.write(
+        `${row.task}\t${row.trials}\t${row.firstStageAccepts}\t${row.confirmedAccepts}\t${ratio}\t${winRate}\t${row.status}\n`
+      );
+    }
+    const measured = report.calibration.filter((row) => !row.skipped);
+    const noisy = measured.filter((row) => row.status === "noisy").length;
+    process.stdout.write(`calibration: ${noisy} of ${measured.length} tasks would accept identical code\n`);
+  }
+  return providerError || calibrationFailure ? 1 : 0;
 }
 
 function helpText() {
@@ -559,7 +609,8 @@ Commands:
   suite                      Run all selected tasks
   meta --tasks <ids>         Optimize the proposer prompt template
   demo                       Scripted-oracle end-to-end harness check
-  doctor                     Show environment and provider status (redacted)
+  doctor [--calibrate]       Show environment and provider status (redacted);
+                             --calibrate runs identical-code paired trials
 
 Proposer options:
   --proposer reference|command|http   Default: command (claude -p)
@@ -585,8 +636,16 @@ Meta options:
   --max-regression <x>       Allowed per-task score loss (default 0.03)
   --min-cost-reduction <x>   Prompt-length reduction accepted without a score gain (default 0.1)
 
+Doctor options:
+  --calibrate                Run identical-code paired trials per task
+  --tasks <id,id>            Limit calibration to selected tasks
+  --trials <n>               Calibration trials per task (default 5)
+  --min-speedup <x>          Paired relative threshold to test (default 0.05)
+  --min-speedup-ms <ms>      Paired absolute threshold to test (default 0.5)
+
 Examples:
   node rsi/bin/rsi.mjs demo
+  node rsi/bin/rsi.mjs doctor --calibrate --tasks top-k-frequent,union-find
   node rsi/bin/rsi.mjs run --task interval-merge --proposer command --iterations 3
   node rsi/bin/rsi.mjs suite --tasks interval-merge,lru-cache --proposer http --model <model>
   node rsi/bin/rsi.mjs suite --proposer command --optimize-performance --iterations 3

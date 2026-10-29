@@ -24,6 +24,7 @@ A real model run uses the Claude Code CLI:
 node rsi/bin/rsi.mjs run --task interval-merge --proposer command --iterations 3
 node rsi/bin/rsi.mjs suite --tasks interval-merge,lru-cache --proposer command
 node rsi/bin/rsi.mjs suite --proposer command --optimize-performance --iterations 3
+node rsi/bin/rsi.mjs doctor --calibrate --tasks top-k-frequent,union-find
 npm run rsi:measure -- --before rsi/runs --after rsi/runs/bench/after --json
 node rsi/bin/rsi.mjs meta --tasks interval-merge,lru-cache --rounds 2
 ```
@@ -45,7 +46,7 @@ node rsi/bin/rsi.mjs run --task <id> [options]
 node rsi/bin/rsi.mjs suite [--tasks <id,id>] [options]
 node rsi/bin/rsi.mjs meta --tasks <id,id> [--rounds 2] [options]
 node rsi/bin/rsi.mjs demo [--json]
-node rsi/bin/rsi.mjs doctor [--json]
+node rsi/bin/rsi.mjs doctor [--calibrate] [--tasks <id,id>] [--trials <n>] [--json]
 ```
 
 Common options:
@@ -67,7 +68,7 @@ Common options:
 | `--apply --target <dir> --yes` | Human-gated write of the best files into an existing directory. |
 | `--rounds`, `--max-regression`, `--min-cost-reduction` | Meta-loop controls. |
 
-`doctor` prints the Node version, benchmark list, config path, and a redacted provider summary. It never prints tokens.
+`doctor` prints the Node version, benchmark list, config path, and a redacted provider summary. It never prints tokens. With `--calibrate`, it also measures every selected task's reference solution against itself, runs `--trials` independent trials per task (default 5), and exits 1 if the performance gate would accept identical code.
 
 ## Loop architecture
 
@@ -140,6 +141,12 @@ This deliberately forbids trading correctness for speed. The absolute floor keep
 After a rejected interleaved comparison, the next proposal prompt adds a `Latest interleaved check` block with the freshly measured reference median, the last candidate's median, the performance score of that measurement, and the exact acceptance rule. The accepted median can be seconds or minutes old; this block makes the proposer aim at what the current best measures on this machine now. The archive and report still record the accepted measurement, which remains the score basis.
 
 In performance mode the two sides are measured together: `evaluateTask` runs the candidate and the current best alternately, starting with a different side each round and rounding an odd run count up to an even number of rounds. Per-round pairs are stored in `benchmarkComparison.pairs`, and the medians, paired ratio, paired delta, win count, and run counts are written to `iterations.jsonl` and the CLI JSON (`referenceBenchMs`, `referenceRuns`, `pairedRatio`, `pairedDeltaMs`, `pairedWins`, `pairedRounds`). The loop recomputes `previousBest.score` from that comparison before deciding, so CPU-frequency drift and JIT warm-up cannot systematically favour either solution. A benchmark-driven acceptance (performance-only, or a score gain that comes entirely from the benchmark component) is then re-measured with `compareBenchmarks`; the confirmation does not re-run the public or hidden tests. Both comparisons must pass, and the accepted iteration records the confirmation measurement. A score gain that also raises hidden correctness or static quality is not benchmark-driven and does not need a confirmation.
+
+### Benchmark calibration
+
+`doctor --calibrate` measures the reference solution against itself. Each trial runs one interleaved comparison with the performance-mode run count (at least six rounds per side). If that comparison would pass the performance gate, the command runs a second, independent comparison exactly as `runTask` does; a task is `noisy` only when both stages pass, because only then would identical code replace the best.
+
+The report shows, per task, the number of first-stage and confirmed false acceptances, the median paired ratio, and the mean round-win rate. A healthy workload centers on ratio 1.0 and a 50% win rate. The command exits 1 if any task would accept identical code, so it can gate benchmark changes in CI. Trials are independent but limited: zero confirmed false acceptances in five trials is evidence, not proof.
 
 ### Hidden tests
 
@@ -327,6 +334,7 @@ rsi/
   src/task.mjs            task loading and validation
   src/workspace.mjs       sandbox creation, proposal validation, apply
   src/evaluator.mjs       commands, TAP parsing, static check, benchmark, scoring
+  src/calibrate.mjs       identical-code trials for the performance gate
   src/prompts.mjs         prompt rendering and formatting
   src/proposers.mjs       scripted, CLI, and HTTP proposers
   src/provider.mjs        switcher config and provider environment mapping
@@ -375,7 +383,7 @@ This distinction matters. Calling the loop "RSI" is useful shorthand for the sca
 - Mutation testing to detect weak hidden tests.
 - Patch-based proposals plus a reviewer model that must justify the diff.
 - Cost and latency budgets alongside score.
-- Add an optional `doctor --calibrate` that runs identical-code paired comparisons and flags workloads too noisy for the 5/6 gate.
+- Archive calibration reports alongside benchmark-suite changes so workload edits remain auditable.
 - Multi-proposer ensembles and cross-model review.
 - Contamination checks that reject suspiciously specific solutions.
 - A human review UI that shows the diff, test deltas, and benchmark deltas before `--apply`.
