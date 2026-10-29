@@ -1,4 +1,4 @@
-import { evaluateTask, summarizeEvaluation } from "./evaluator.mjs";
+import { compareBenchmarks, evaluateTask, summarizeEvaluation } from "./evaluator.mjs";
 import { summarizeFailure } from "./memory.mjs";
 import { buildProposalPrompt, loadPromptTemplate } from "./prompts.mjs";
 import { readCurrentEditable, validateProposal } from "./workspace.mjs";
@@ -48,6 +48,7 @@ function renderReport(task, result) {
 export function acceptanceDecision({
   candidate,
   best,
+  comparison,
   minDelta = 0.01,
   optimizePerformance = false,
   minSpeedup = 0.05,
@@ -57,18 +58,79 @@ export function acceptanceDecision({
   const absoluteSpeedup = Math.max(0, Number(minSpeedupMs) || 0);
   const hiddenNotWorse = candidate.hiddenPassRate >= best.hiddenPassRate - 1e-9;
   const scoreImproved = candidate.score > best.score + minDelta && hiddenNotWorse;
+  // Per-round differences cancel CPU drift far better than two medians taken
+  // from separate sample sets. Fall back to the medians when the evaluator
+  // could not pair at least three rounds.
+  const paired =
+    comparison &&
+    Number.isFinite(comparison.pairedRatio) &&
+    Number.isFinite(comparison.pairedDeltaMs) &&
+    Number.isFinite(comparison.pairedWins) &&
+    Number.isFinite(comparison.pairedRounds);
+  const relativeWin = paired
+    ? comparison.pairedRatio < 1 - speedup
+    : candidate.benchMs < best.benchMs * (1 - speedup);
+  const absoluteWin = paired
+    ? comparison.pairedDeltaMs >= absoluteSpeedup - 1e-9
+    : best.benchMs - candidate.benchMs >= absoluteSpeedup - 1e-9;
+  // A genuine speedup wins nearly every paired round; a noise-level "win"
+  // wins only a bare majority and should not replace the best solution.
+  const decisive = paired
+    ? comparison.pairedWins >= Math.ceil(comparison.pairedRounds * (5 / 6))
+    : true;
   const performanceImproved =
     Boolean(optimizePerformance) &&
     hiddenNotWorse &&
     candidate.score >= best.score - 1e-9 &&
     Number.isFinite(candidate.benchMs) &&
     Number.isFinite(best.benchMs) &&
-    candidate.benchMs < best.benchMs * (1 - speedup) &&
-    best.benchMs - candidate.benchMs >= absoluteSpeedup - 1e-9;
+    relativeWin &&
+    absoluteWin &&
+    decisive;
 
   return {
     accepted: scoreImproved || performanceImproved,
     reason: scoreImproved ? "score" : performanceImproved ? "performance" : "rejected"
+  };
+}
+
+function scoreWithPerformance(task, evaluation, performance) {
+  return (
+    task.weights.correctness * evaluation.hiddenPassRate +
+    task.weights.performance * performance +
+    task.weights.quality * evaluation.quality
+  );
+}
+
+function coreScore(task, evaluation) {
+  return scoreWithPerformance(task, evaluation, 0);
+}
+
+// The candidate's benchmark is measured in alternating rounds with the current
+// best. Recompute the best's score from that same comparison so a performance
+// decision never compares medians taken at different points in time.
+function comparisonReference(task, best, comparison) {
+  if (!comparison || !Number.isFinite(comparison.benchMs)) {
+    return best;
+  }
+  const performance = comparison.score;
+  return {
+    ...best,
+    benchMs: comparison.benchMs,
+    benchmarkRuns: comparison.runs,
+    performance,
+    score: scoreWithPerformance(task, best, performance)
+  };
+}
+
+function withBenchmark(task, evaluation, benchmark) {
+  return {
+    ...evaluation,
+    performance: benchmark.score,
+    benchMs: benchmark.benchMs,
+    benchmarkRuns: benchmark.runs,
+    benchmarkComparison: benchmark.comparison,
+    score: scoreWithPerformance(task, evaluation, benchmark.score)
   };
 }
 
@@ -162,20 +224,60 @@ export async function runTask(task, options = {}) {
       continue;
     }
 
-    const candidate = await evaluateTask(task, {
+    const benchmarkEnabled = options.measureBenchmark !== false;
+    // Interleaving needs a best solution whose benchmark actually completed;
+    // a baseline that times out cannot establish a performance reference.
+    const compareBenchmark =
+      optimizePerformance && benchmarkEnabled && Number.isFinite(best.benchMs);
+    let candidate = await evaluateTask(task, {
       files: normalizedFiles,
       benchmarkRuns,
-      measureBenchmark: options.measureBenchmark !== false
+      measureBenchmark: benchmarkEnabled,
+      compareFiles: compareBenchmark ? bestFiles : undefined
     });
-    const previousBestScore = best.score;
-    const decision = acceptanceDecision({
+    const reference = comparisonReference(task, best, candidate.benchmarkComparison);
+    let previousBestScore = reference.score;
+    let decision = acceptanceDecision({
       candidate,
-      best,
+      best: reference,
+      comparison: candidate.benchmarkComparison,
       minDelta,
       optimizePerformance,
       minSpeedup,
       minSpeedupMs
     });
+    // A score gain can also be benchmark-driven when correctness and quality
+    // did not change. Any benchmark-driven acceptance must reproduce.
+    const benchmarkDriven =
+      decision.reason === "performance" ||
+      (decision.reason === "score" &&
+        Boolean(candidate.benchmarkComparison) &&
+        coreScore(task, candidate) <= coreScore(task, reference) + 1e-9);
+    let confirmation;
+    if (benchmarkDriven) {
+      // Timing noise on a shared machine can produce a one-off 5%-plus win.
+      // Require a second independent comparison before replacing the best.
+      confirmation = await compareBenchmarks(task, normalizedFiles, bestFiles, benchmarkRuns);
+      const confirmedCandidate = withBenchmark(task, candidate, confirmation);
+      const confirmedReference = comparisonReference(task, best, confirmation.comparison);
+      const confirmed = acceptanceDecision({
+        candidate: confirmedCandidate,
+        best: confirmedReference,
+        comparison: confirmation.comparison,
+        minDelta,
+        optimizePerformance,
+        minSpeedup,
+        minSpeedupMs
+      });
+      const confirmedOk =
+        decision.reason === "performance" ? confirmed.reason === "performance" : confirmed.accepted;
+      if (confirmedOk) {
+        candidate = confirmedCandidate;
+        previousBestScore = confirmedReference.score;
+      } else {
+        decision = { accepted: false, reason: "rejected" };
+      }
+    }
     const accepted = decision.accepted;
 
     const entry = {
@@ -196,12 +298,15 @@ export async function runTask(task, options = {}) {
       previousFailures = [
         ...previousFailures,
         summarizeFailure(candidate, task, {
-          bestScore: best.score,
-          bestHiddenPassRate: best.hiddenPassRate,
-          bestBenchMs: best.benchMs,
+          bestScore: reference.score,
+          bestHiddenPassRate: reference.hiddenPassRate,
+          bestBenchMs: reference.benchMs,
           optimizePerformance,
           minSpeedup,
-          minSpeedupMs
+          minSpeedupMs,
+          confirmationFailed: Boolean(confirmation) && !accepted,
+          confirmationCandidateMs: confirmation?.benchMs,
+          confirmationBestMs: confirmation?.comparison?.benchMs
         })
       ].slice(-5);
     }

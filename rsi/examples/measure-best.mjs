@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evaluateTask, runCommand } from "../src/evaluator.mjs";
+import { evaluateTask, parseBenchmarkMs, performanceScore, runCommand } from "../src/evaluator.mjs";
 import { applyFiles, cleanupSandbox, createSandbox } from "../src/workspace.mjs";
 import { listTasks } from "../src/task.mjs";
 import { median, safeId } from "../src/util.mjs";
@@ -54,25 +54,6 @@ async function readBestFiles(directory, task) {
     files[relative] = await fs.readFile(file, "utf8");
   }
   return files;
-}
-
-function parseBenchmarkMs(output, fallbackMs) {
-  const text = String(output ?? "");
-  const match = text.match(/"(?:ms|elapsedMs|timeMs)"\s*:\s*([0-9]+(?:\.[0-9]+)?)/i);
-  return match ? Number(match[1]) : fallbackMs;
-}
-
-function performanceScore(benchmark, benchMs) {
-  if (!benchmark || !Number.isFinite(benchMs)) {
-    return 0;
-  }
-  if (benchMs <= benchmark.targetMs) {
-    return 1;
-  }
-  if (benchMs >= benchmark.maxMs) {
-    return 0;
-  }
-  return (benchmark.maxMs - benchMs) / (benchmark.maxMs - benchmark.targetMs);
 }
 
 async function createRunner(task, files) {

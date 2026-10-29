@@ -149,6 +149,71 @@ test("acceptanceDecision allows faster equal-score candidates only in performanc
     }),
     { accepted: true, reason: "score" }
   );
+
+  // A paired comparison overrides the medians and must also win almost every
+  // round, so a single lucky pair cannot carry a performance acceptance.
+  const equal = { score: 1, hiddenPassRate: 1, benchMs: 100 };
+  const paired = (overrides) => ({
+    pairedRatio: 0.9,
+    pairedDeltaMs: 2,
+    pairedWins: 5,
+    pairedRounds: 6,
+    ...overrides
+  });
+  assert.equal(
+    acceptanceDecision({
+      candidate: equal,
+      best: equal,
+      comparison: paired({}),
+      optimizePerformance: true
+    }).accepted,
+    true
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: equal,
+      best: equal,
+      comparison: paired({ pairedWins: 4 }),
+      optimizePerformance: true
+    }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: equal,
+      best: equal,
+      comparison: paired({ pairedRatio: 0.97 }),
+      optimizePerformance: true
+    }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: equal,
+      best: equal,
+      comparison: paired({ pairedDeltaMs: 0.3 }),
+      optimizePerformance: true
+    }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: equal,
+      best: equal,
+      comparison: paired({ pairedWins: 8, pairedRounds: 10 }),
+      optimizePerformance: true
+    }).accepted,
+    false
+  );
+  assert.equal(
+    acceptanceDecision({
+      candidate: equal,
+      best: equal,
+      comparison: paired({ pairedWins: 9, pairedRounds: 10 }),
+      optimizePerformance: true
+    }).accepted,
+    true
+  );
 });
 
 test("runTask keeps iterating after the target score in performance mode", async () => {
@@ -167,8 +232,34 @@ test("runTask keeps iterating after the target score in performance mode", async
   assert.equal(result.history.length, 2);
   assert.equal(result.history[0].accepted, true);
   assert.equal(result.history[0].reason, "score");
+  // The baseline completed its benchmark, so the candidate was measured in
+  // alternating rounds against it.
+  assert.ok(Number.isFinite(result.history[0].evaluation.benchmarkComparison?.benchMs));
+  assert.ok(Number.isFinite(result.history[1].evaluation.benchmarkComparison?.pairedRatio));
   assert.equal(result.best.hiddenPassRate, 1);
   assert.ok(Math.abs(result.best.score - 1) < 1e-9);
+});
+
+test("runTask establishes a performance reference after a score acceptance", async () => {
+  const task = await findTask(path.join(rsiRoot, "benchmarks"), "interval-merge");
+  const proposer = new ScriptedProposer(() => ({
+    files: referenceSolutions[task.id],
+    rationale: "reference",
+    lessons: []
+  }));
+  const result = await runTask(task, {
+    proposer,
+    maxIterations: 2,
+    optimizePerformance: true,
+    measureBaselineBenchmark: false
+  });
+
+  // The baseline has no benchmark median, so the first candidate is measured
+  // alone; once it becomes best, the next iteration is interleaved with it.
+  assert.equal(result.history[0].evaluation.benchmarkComparison, undefined);
+  assert.ok(Number.isFinite(result.history[0].evaluation.benchMs));
+  assert.ok(Number.isFinite(result.history[1].evaluation.benchmarkComparison?.benchMs));
+  assert.ok(Number.isFinite(result.history[1].evaluation.benchmarkComparison?.pairedRatio));
 });
 
 test("runSuite aggregates multiple tasks with a fresh proposer per task", async () => {

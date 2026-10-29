@@ -149,3 +149,28 @@ test("evaluateTask can override the number of benchmark runs", async () => {
   assert.equal(result.benchmarkRuns.length, 3);
   assert.equal(result.performance, 1);
 });
+
+test("evaluateTask interleaves candidate and reference benchmark rounds", async () => {
+  const task = await loadTask(path.join(rsiRoot, "benchmarks", "algorithms", "top-k-frequent"));
+  const files = referenceSolutions[task.id];
+  const result = await evaluateTask(task, {
+    files,
+    compareFiles: files,
+    benchmarkRuns: 3
+  });
+
+  // Three requested runs round up to four alternating rounds per side.
+  assert.equal(result.benchmarkRuns.length, 4);
+  assert.equal(result.benchmarkComparison.runs.length, 4);
+  assert.equal(result.benchmarkComparison.pairedRounds, 4);
+  assert.ok(result.benchmarkComparison.pairedWins >= 0);
+  assert.ok(result.benchmarkComparison.pairedWins <= 4);
+  assert.ok(Number.isFinite(result.benchmarkComparison.pairedRatio));
+  assert.ok(Number.isFinite(result.benchmarkComparison.pairedDeltaMs));
+  assert.ok(result.benchMs > 0);
+  assert.ok(result.benchmarkComparison.benchMs > 0);
+  assert.equal(result.performance, 1);
+  assert.equal(result.benchmarkComparison.score, 1);
+  assert.ok(Math.abs(result.score - 1) < 1e-9);
+  assert.equal(summarizeEvaluation(result).referenceRuns, 4);
+});

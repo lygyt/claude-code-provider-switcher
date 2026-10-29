@@ -218,6 +218,20 @@ function resultSummary(result, applied = []) {
       reason: entry.reason ?? null,
       score: entry.evaluation ? round(entry.evaluation.score) : null,
       benchMs: entry.evaluation?.benchMs === undefined ? null : Math.round(entry.evaluation.benchMs),
+      runs: entry.evaluation?.benchmarkRuns?.length ?? 0,
+      referenceBenchMs:
+        entry.evaluation?.benchmarkComparison?.benchMs === undefined
+          ? null
+          : Math.round(entry.evaluation.benchmarkComparison.benchMs),
+      referenceRuns: entry.evaluation?.benchmarkComparison?.runs?.length ?? 0,
+      pairedRatio: Number.isFinite(entry.evaluation?.benchmarkComparison?.pairedRatio)
+        ? round(entry.evaluation.benchmarkComparison.pairedRatio)
+        : null,
+      pairedDeltaMs: Number.isFinite(entry.evaluation?.benchmarkComparison?.pairedDeltaMs)
+        ? Math.round(entry.evaluation.benchmarkComparison.pairedDeltaMs * 100) / 100
+        : null,
+      pairedWins: entry.evaluation?.benchmarkComparison?.pairedWins ?? null,
+      pairedRounds: entry.evaluation?.benchmarkComparison?.pairedRounds ?? null,
       error: entry.error,
       rationale: entry.rationale
     }))

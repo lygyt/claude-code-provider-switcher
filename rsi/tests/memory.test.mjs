@@ -149,6 +149,28 @@ test("summarizeFailure combines all diagnostic channels", () => {
       {
         score: 1,
         hiddenPassRate: 1,
+        benchMs: 90,
+        performance: 1,
+        hiddenResult: {},
+        publicResult: {},
+        violations: []
+      },
+      task,
+      {
+        ...performanceContext,
+        confirmationFailed: true,
+        confirmationCandidateMs: 94,
+        confirmationBestMs: 100
+      }
+    ),
+    /not reproduced on a confirmation comparison \(94ms vs 100ms\)/
+  );
+
+  assert.match(
+    summarizeFailure(
+      {
+        score: 1,
+        hiddenPassRate: 1,
         benchMs: 3.7,
         performance: 1,
         hiddenResult: {},

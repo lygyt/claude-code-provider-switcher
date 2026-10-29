@@ -259,7 +259,7 @@ export function staticCheck(task, files) {
   return { quality, violations, totalBytes };
 }
 
-function parseBenchmarkMs(output, fallbackMs) {
+export function parseBenchmarkMs(output, fallbackMs) {
   const text = String(output ?? "");
   const match = text.match(/"(?:ms|elapsedMs|timeMs)"\s*:\s*([0-9]+(?:\.[0-9]+)?)/i);
   if (match) {
@@ -268,8 +268,8 @@ function parseBenchmarkMs(output, fallbackMs) {
   return fallbackMs;
 }
 
-function performanceScore(benchmark, benchMs) {
-  if (!Number.isFinite(benchMs)) {
+export function performanceScore(benchmark, benchMs) {
+  if (!benchmark || !Number.isFinite(benchMs)) {
     return 0;
   }
   if (benchMs <= benchmark.targetMs) {
@@ -281,16 +281,20 @@ function performanceScore(benchmark, benchMs) {
   return clamp((benchmark.maxMs - benchMs) / (benchmark.maxMs - benchmark.targetMs), 0, 1);
 }
 
+function benchmarkRunCount(task, runsOverride) {
+  const requestedRuns = Number(runsOverride ?? task.benchmark.runs);
+  return Number.isFinite(requestedRuns)
+    ? Math.max(1, Math.floor(requestedRuns))
+    : task.benchmark.runs;
+}
+
 async function runBenchmark(task, sandbox, runsOverride) {
   if (!task.benchmark) {
     return { runs: [], benchMs: undefined, score: 0 };
   }
 
   const runs = [];
-  const requestedRuns = Number(runsOverride ?? task.benchmark.runs);
-  const runCount = Number.isFinite(requestedRuns)
-    ? Math.max(1, Math.floor(requestedRuns))
-    : task.benchmark.runs;
+  const runCount = benchmarkRunCount(task, runsOverride);
   const timeoutMs = task.benchmark.timeoutMs ?? task.timeoutMs;
   for (let index = 0; index < runCount; index += 1) {
     const result = await runCommand(task.benchmark.command, {
@@ -309,6 +313,88 @@ async function runBenchmark(task, sandbox, runsOverride) {
     benchMs,
     score: performanceScore(task.benchmark, benchMs)
   };
+}
+
+// Measure the candidate and the current best in alternating rounds so CPU
+// frequency drift and sandbox position affect both sides equally. An odd
+// number of rounds is rounded up to an even one so each side starts half the
+// rounds; the median then compares like with like.
+async function interleavedBenchmark(task, candidateSandbox, bestFiles, runsOverride) {
+  const runCount = benchmarkRunCount(task, runsOverride);
+  const rounds = Number.isFinite(runCount) ? (runCount % 2 === 0 ? runCount : runCount + 1) : runCount;
+  const timeoutMs = task.benchmark.timeoutMs ?? task.timeoutMs;
+  const samples = { candidate: [], best: [] };
+  const pairs = [];
+  const bestSandbox = await createSandbox(task);
+  try {
+    await applyFiles(bestSandbox.workspaceDir, validateProposal(task, bestFiles));
+    const sandboxes = { candidate: candidateSandbox, best: bestSandbox };
+    for (let round = 0; round < rounds; round += 1) {
+      const order = round % 2 === 0 ? ["candidate", "best"] : ["best", "candidate"];
+      const roundMs = {};
+      for (const name of order) {
+        const result = await runCommand(task.benchmark.command, {
+          cwd: sandboxes[name].root,
+          timeoutMs,
+          env: buildEvaluationEnv()
+        });
+        if (!result.timedOut && result.code === 0) {
+          const benchMs = parseBenchmarkMs(result.stdout, result.durationMs);
+          samples[name].push(benchMs);
+          roundMs[name] = benchMs;
+        }
+      }
+      if (Number.isFinite(roundMs.candidate) && Number.isFinite(roundMs.best)) {
+        pairs.push({ candidateMs: roundMs.candidate, bestMs: roundMs.best });
+      }
+    }
+  } finally {
+    await cleanupSandbox(bestSandbox);
+  }
+
+  const candidateMs = median(samples.candidate);
+  const bestMs = median(samples.best);
+  const comparison = {
+    runs: samples.best,
+    benchMs: bestMs,
+    score: performanceScore(task.benchmark, bestMs),
+    pairs
+  };
+  // Paired ratios cancel drift within a round much better than comparing two
+  // medians. Require at least three complete rounds before trusting them.
+  if (pairs.length >= 3) {
+    const pairedRatio = median(pairs.map((pair) => pair.candidateMs / pair.bestMs));
+    const pairedDeltaMs = median(pairs.map((pair) => pair.bestMs - pair.candidateMs));
+    if (Number.isFinite(pairedRatio) && Number.isFinite(pairedDeltaMs)) {
+      comparison.pairedRatio = pairedRatio;
+      comparison.pairedDeltaMs = pairedDeltaMs;
+      comparison.pairedWins = pairs.filter((pair) => pair.candidateMs < pair.bestMs).length;
+      comparison.pairedRounds = pairs.length;
+    }
+  }
+
+  return {
+    runs: samples.candidate,
+    benchMs: candidateMs,
+    score: performanceScore(task.benchmark, candidateMs),
+    comparison
+  };
+}
+
+// A standalone interleaved comparison used to confirm a performance win
+// without re-running the public and hidden tests.
+export async function compareBenchmarks(task, candidateFiles, bestFiles, runsOverride) {
+  if (!task.benchmark) {
+    throw new Error("compareBenchmarks requires a task with a benchmark.");
+  }
+  const files = validateProposal(task, candidateFiles);
+  const sandbox = await createSandbox(task);
+  try {
+    await applyFiles(sandbox.workspaceDir, files);
+    return await interleavedBenchmark(task, sandbox, bestFiles, runsOverride);
+  } finally {
+    await cleanupSandbox(sandbox);
+  }
 }
 
 export async function evaluateTask(task, options = {}) {
@@ -359,7 +445,9 @@ export async function evaluateTask(task, options = {}) {
 
     const benchmark = options.measureBenchmark === false
       ? { runs: [], benchMs: undefined, score: 0 }
-      : await runBenchmark(task, sandbox, options.benchmarkRuns);
+      : options.compareFiles && task.benchmark
+        ? await interleavedBenchmark(task, sandbox, options.compareFiles, options.benchmarkRuns)
+        : await runBenchmark(task, sandbox, options.benchmarkRuns);
 
     const hiddenPassRate = hiddenResult.total ? hiddenResult.passed / hiddenResult.total : 0;
     const publicPassRate = publicResult.total ? publicResult.passed / publicResult.total : 0;
@@ -378,6 +466,7 @@ export async function evaluateTask(task, options = {}) {
       performance: benchmark.score,
       benchMs: benchmark.benchMs,
       benchmarkRuns: benchmark.runs,
+      benchmarkComparison: benchmark.comparison,
       quality: staticResult.quality,
       violations: staticResult.violations,
       publicResult,
@@ -417,6 +506,20 @@ export function summarizeEvaluation(evaluation) {
     public: `${evaluation.publicResult.passed}/${evaluation.publicResult.total}`,
     performance: Number(evaluation.performance.toFixed(4)),
     benchMs: evaluation.benchMs === undefined ? null : Math.round(evaluation.benchMs),
+    runs: evaluation.benchmarkRuns?.length ?? 0,
+    referenceBenchMs:
+      evaluation.benchmarkComparison?.benchMs === undefined
+        ? null
+        : Math.round(evaluation.benchmarkComparison.benchMs),
+    referenceRuns: evaluation.benchmarkComparison?.runs?.length ?? 0,
+    pairedRatio: Number.isFinite(evaluation.benchmarkComparison?.pairedRatio)
+      ? Number(evaluation.benchmarkComparison.pairedRatio.toFixed(4))
+      : null,
+    pairedDeltaMs: Number.isFinite(evaluation.benchmarkComparison?.pairedDeltaMs)
+      ? Math.round(evaluation.benchmarkComparison.pairedDeltaMs * 100) / 100
+      : null,
+    pairedWins: evaluation.benchmarkComparison?.pairedWins ?? null,
+    pairedRounds: evaluation.benchmarkComparison?.pairedRounds ?? null,
     quality: Number(evaluation.quality.toFixed(4)),
     violations: evaluation.violations,
     error: evaluation.error,

@@ -101,7 +101,7 @@ task spec + weak baseline
 
 At the start of a run, the weak baseline is evaluated with the benchmark enabled too, so it has the same score basis as candidates. If a baseline or candidate benchmark exceeds its timeout, performance is scored as zero rather than hanging the loop indefinitely.
 
-Each proposal prompt includes the current best hidden/public counts, measured median benchmark time, target, maximum, and performance score. With `--optimize-performance`, the baseline and every candidate use at least five benchmark runs, the loop does not stop at `targetScore`, and an equal-score candidate is accepted when its median is at least `--min-speedup` faster and at least `--min-speedup-ms` milliseconds faster.
+Each proposal prompt includes the current best hidden/public counts, measured median benchmark time, target, maximum, and performance score. With `--optimize-performance`, the baseline and every candidate use at least five benchmark runs, the loop does not stop at `targetScore`, and an equal-score candidate is accepted when its median is at least `--min-speedup` faster and at least `--min-speedup-ms` milliseconds faster. When the current best has a usable benchmark, every candidate is measured against it in alternating rounds inside two sandboxes, and both sides are scored from that one comparison. If the best never completed a benchmark run (for example, an exponential starter that times out), the first candidate is measured alone and a score acceptance establishes the reference.
 
 ### Score
 
@@ -123,15 +123,21 @@ A candidate's hidden pass rate must never fall. Given that, it is accepted if ei
 candidate.score > previousBest.score + minDelta
 ```
 
-or, with `--optimize-performance`, when the score is not lower and the median benchmark time improves by at least `minSpeedup` **and** at least `minSpeedupMs` milliseconds:
+or, with `--optimize-performance`, when the score is not lower and the benchmark improves by at least `minSpeedup` **and** at least `minSpeedupMs` milliseconds. When a paired comparison is available, the gate uses the per-round differences rather than two independent medians:
 
 ```text
 candidate.score >= previousBest.score - 1e-9
-AND candidate.benchMs < previousBest.benchMs * (1 - minSpeedup)
-AND previousBest.benchMs - candidate.benchMs >= minSpeedupMs
+AND median(candidate_i / previousBest_i) < 1 - minSpeedup
+AND median(previousBest_i - candidate_i) >= minSpeedupMs
+AND candidate_wins >= ceil(5/6 * paired_rounds)
+AND the same conditions hold in a second, independent comparison
 ```
 
+Round `i` runs the candidate and the best back to back. Requiring a win in almost every round rejects a single lucky pair, and the second comparison rejects a timing artifact that does not reproduce. Without a paired comparison (for example, when calling `acceptanceDecision` directly), the medians provide the fallback: `candidate.benchMs < previousBest.benchMs * (1 - minSpeedup)` and `previousBest.benchMs - candidate.benchMs >= minSpeedupMs`.
+
 This deliberately forbids trading correctness for speed. The absolute floor keeps sub-millisecond timer noise from counting as a win; the regex-match benchmark originally exposed this failure mode (a 0.01ms median could "improve" to 0.00ms), so that workload was recalibrated. The loop stops early when the best score reaches `targetScore` (default 0.98), unless performance mode is enabled; performance mode uses the remaining iterations to seek faster equal-score implementations and takes at least five benchmark runs per evaluation.
+
+In performance mode the two sides are measured together: `evaluateTask` runs the candidate and the current best alternately, starting with a different side each round and rounding an odd run count up to an even number of rounds. Per-round pairs are stored in `benchmarkComparison.pairs`, and the medians, paired ratio, paired delta, win count, and run counts are written to `iterations.jsonl` and the CLI JSON (`referenceBenchMs`, `referenceRuns`, `pairedRatio`, `pairedDeltaMs`, `pairedWins`, `pairedRounds`). The loop recomputes `previousBest.score` from that comparison before deciding, so CPU-frequency drift and JIT warm-up cannot systematically favour either solution. A benchmark-driven acceptance (performance-only, or a score gain that comes entirely from the benchmark component) is then re-measured with `compareBenchmarks`; the confirmation does not re-run the public or hidden tests. Both comparisons must pass, and the accepted iteration records the confirmation measurement. A score gain that also raises hidden correctness or static quality is not benchmark-driven and does not need a confirmation.
 
 ### Hidden tests
 
@@ -307,7 +313,7 @@ Caveats:
 - The before suite stopped at score 1.0 after one iteration by design. The comparison measures the whole scaffold change (benchmark feedback, continued iteration, and the performance gate), not the gate in isolation.
 - The after suite ran in two segments because a 2-hour background budget covered seven tasks. The remaining five continued with the same archive and lesson store; no task was re-run or cherry-picked.
 - Two iteration-3 proposer calls timed out at 600s (interval-merge and max-flow) and were recorded as rejected iterations; the earlier accepted solutions stayed best.
-- The 3-run in-loop medians were sometimes misleading: dijkstra's before best read 25ms in the suite but 11.41ms under interleaved measurement, so its apparent 2× gain was mostly noise. This is why performance mode now takes at least five benchmark runs and requires an absolute win.
+- The 3-run in-loop medians were sometimes misleading: dijkstra's before best read 25ms in the suite but 11.41ms under interleaved measurement, so its apparent 2× gain was mostly noise. This is why performance mode now takes at least five benchmark runs, requires an absolute win, re-measures candidate and best in alternating rounds, and confirms every performance-only acceptance with a second comparison. On this machine, identical code compared in six paired rounds still produced a 5%-plus median win in 1 of 20 trials; the 5/6 win requirement and the confirmation stage exist to reject exactly that artifact.
 - `regex-match` was recalibrated after the run because its old workload measured 0ms. The table uses the new 20,000-character workload (target 120ms). The suite's in-loop regex iteration saw the old workload and accepted a sub-millisecond "win"; the new `--min-speedup-ms` floor would reject it.
 
 ## Repository layout
@@ -367,7 +373,7 @@ This distinction matters. Calling the loop "RSI" is useful shorthand for the sca
 - Patch-based proposals plus a reviewer model that must justify the diff.
 - Cost and latency budgets alongside score.
 - Calibrate the remaining single-digit-millisecond workloads (union-find, top-k-frequent) so a 5% win also clears the 0.5ms absolute floor.
-- Measure the candidate and the current best in interleaved runs inside the evaluator, instead of comparing medians from different points in time.
+- Feed the latest interleaved reference median into the next proposal prompt; today the prompt shows the best's last accepted measurement.
 - Multi-proposer ensembles and cross-model review.
 - Contamination checks that reject suspiciously specific solutions.
 - A human review UI that shows the diff, test deltas, and benchmark deltas before `--apply`.

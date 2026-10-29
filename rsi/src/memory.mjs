@@ -151,7 +151,13 @@ export function summarizeFailure(evaluation, task, context = {}) {
     parts.push(`Policy violations: ${evaluation.violations.join("; ")}`);
   }
   if (!evaluation.error && task?.benchmark) {
-    if (!Number.isFinite(evaluation.benchMs)) {
+    if (context.confirmationFailed) {
+      parts.push(
+        `Benchmark speedup was not reproduced on a confirmation comparison (${formatMs(
+          context.confirmationCandidateMs
+        )}ms vs ${formatMs(context.confirmationBestMs)}ms); treat the first result as timing noise.`
+      );
+    } else if (!Number.isFinite(evaluation.benchMs)) {
       parts.push(
         `Benchmark produced no successful run (target ${task.benchmark.targetMs}ms, max ${task.benchmark.maxMs}ms).`
       );
