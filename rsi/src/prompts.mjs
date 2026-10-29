@@ -63,6 +63,35 @@ export function formatHiddenSummary(result) {
   }`;
 }
 
+function formatReferenceCheck(evaluation) {
+  const referenceMs = Math.round(evaluation.referenceBenchMs);
+  const rounds = Number.isFinite(evaluation.referenceRounds)
+    ? evaluation.referenceRounds
+    : Number.isFinite(evaluation.referenceRuns)
+      ? evaluation.referenceRuns
+      : 0;
+  const roundsText =
+    rounds > 0 ? `${rounds} alternating round${rounds === 1 ? "" : "s"}` : "alternating rounds";
+  const performance = Number.isFinite(evaluation.referencePerformance)
+    ? `; performance score ${evaluation.referencePerformance.toFixed(3)}`
+    : "";
+  const candidate = Number.isFinite(evaluation.latestCandidateMs)
+    ? ` The last candidate measured ${Math.round(evaluation.latestCandidateMs)}ms.`
+    : "";
+  const speedupPercent = Number.isFinite(evaluation.minSpeedup)
+    ? Math.round(evaluation.minSpeedup * 100)
+    : 5;
+  const absoluteMs = Number.isFinite(evaluation.minSpeedupMs) ? evaluation.minSpeedupMs : 0.5;
+  const wins =
+    Number.isFinite(evaluation.referenceRounds) && evaluation.referenceRounds > 0
+      ? `, and win at least ${Math.ceil((evaluation.referenceRounds * 5) / 6)} of ${evaluation.referenceRounds} paired rounds`
+      : "";
+  return (
+    `Latest interleaved check: the current best measured ${referenceMs}ms median over ${roundsText}${performance}.` +
+    `${candidate} An equal-score replacement must be at least ${speedupPercent}% and ${absoluteMs}ms faster${wins}, then reproduce the win in a second comparison.`
+  );
+}
+
 export function formatBenchmarkResult(benchmark, evaluation = {}) {
   if (!benchmark) {
     return "(no benchmark)";
@@ -80,9 +109,18 @@ export function formatBenchmarkResult(benchmark, evaluation = {}) {
   const performance = Number.isFinite(evaluation.performance)
     ? evaluation.performance.toFixed(3)
     : "n/a";
-  return `Benchmark: ${milliseconds}ms median${runs}; target ${target}ms, max ${max}ms; ${
-    evaluation.benchMs <= target ? "target met" : "misses target"
-  }; performance score ${performance}. Lower median time is better when correctness is equal.`;
+  const lines = [
+    `Benchmark: ${milliseconds}ms median${runs}; target ${target}ms, max ${max}ms; ${
+      evaluation.benchMs <= target ? "target met" : "misses target"
+    }; performance score ${performance}. Lower median time is better when correctness is equal.`
+  ];
+  // After a rejected comparison the accepted median may be stale. Tell the
+  // proposer what the current best measures on this machine right now and
+  // exactly what the paired gate requires.
+  if (Number.isFinite(evaluation.referenceBenchMs)) {
+    lines.push(formatReferenceCheck(evaluation));
+  }
+  return lines.join("\n\n");
 }
 
 export function buildProposalPrompt(task, request, template) {
@@ -98,7 +136,14 @@ export function buildProposalPrompt(task, request, template) {
     BENCHMARK_RESULT: formatBenchmarkResult(task.benchmark, {
       benchMs: request.benchMs,
       performance: request.performance,
-      benchmarkRuns: request.benchmarkRuns
+      benchmarkRuns: request.benchmarkRuns,
+      referenceBenchMs: request.referenceBenchMs,
+      referenceRuns: request.referenceRuns,
+      referenceRounds: request.referenceRounds,
+      referencePerformance: request.referencePerformance,
+      latestCandidateMs: request.latestCandidateMs,
+      minSpeedup: request.minSpeedup,
+      minSpeedupMs: request.minSpeedupMs
     }),
     LESSONS: formatLessons(request.lessons ?? []),
     PREVIOUS_FAILURES: request.previousFailures?.length

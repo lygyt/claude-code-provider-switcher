@@ -87,22 +87,32 @@ async function writeSyntheticTask(root, callsFile, slowAfterCall, targetMs) {
   return loadTask(taskDir);
 }
 
-async function runFixture({ slowAfterCall = 1_000_000_000, targetMs = 100 } = {}) {
+async function runFixture({
+  slowAfterCall = 1_000_000_000,
+  targetMs = 100,
+  candidate = candidateSolution,
+  maxIterations = 1
+} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rsi-confirm-"));
   const callsFile = path.join(root, "benchmark-calls.log");
   try {
     const task = await writeSyntheticTask(root, callsFile, slowAfterCall, targetMs);
-    const proposer = new ScriptedProposer([
-      { files: { "solution.js": candidateSolution }, rationale: "Ten times cheaper.", lessons: [] }
-    ]);
+    const proposer = new ScriptedProposer(
+      Array.from({ length: maxIterations }, () => ({
+        files: { "solution.js": candidate },
+        rationale: "Synthetic candidate.",
+        lessons: []
+      }))
+    );
     const result = await runTask(task, {
       proposer,
-      maxIterations: 1,
+      maxIterations,
       optimizePerformance: true
     });
     return {
       result,
-      calls: (await readText(callsFile)).trim().split("\n").length
+      calls: (await readText(callsFile)).trim().split("\n").length,
+      requests: proposer.requests
     };
   } finally {
     await removeDir(root);
@@ -146,4 +156,26 @@ test("runTask rejects a speedup that does not reproduce", async () => {
   assert.equal(result.history[0].reason, "rejected");
   assert.equal(result.best.benchMs, 100);
   assert.equal(calls, 5 + 12 + 12);
+});
+
+test("runTask feeds the latest interleaved reference into the next proposal", async () => {
+  // A slower but correct candidate is rejected, yet its comparison measured
+  // the current best on this machine. The next prompt should use that fresh
+  // 100ms reference instead of assuming the accepted median is still current.
+  const slowerSolution = baselineSolution.replace("COST = 100", "COST = 200");
+  const { result, calls, requests } = await runFixture({
+    candidate: slowerSolution,
+    maxIterations: 2
+  });
+
+  assert.equal(result.history.length, 2);
+  assert.equal(result.history[0].accepted, false);
+  assert.equal(result.best.benchMs, 100);
+  assert.equal(calls, 5 + 12 + 12);
+  assert.match(
+    requests[1].prompt,
+    /Latest interleaved check: the current best measured 100ms median over 6 alternating rounds/
+  );
+  assert.match(requests[1].prompt, /The last candidate measured 200ms\./);
+  assert.match(requests[1].prompt, /at least 5% and 0\.5ms faster/);
 });

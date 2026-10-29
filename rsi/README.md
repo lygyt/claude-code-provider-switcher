@@ -137,6 +137,8 @@ Round `i` runs the candidate and the best back to back. Requiring a win in almos
 
 This deliberately forbids trading correctness for speed. The absolute floor keeps sub-millisecond timer noise from counting as a win; the regex-match benchmark originally exposed this failure mode (a 0.01ms median could "improve" to 0.00ms), so that workload was recalibrated. The loop stops early when the best score reaches `targetScore` (default 0.98), unless performance mode is enabled; performance mode uses the remaining iterations to seek faster equal-score implementations and takes at least five benchmark runs per evaluation.
 
+After a rejected interleaved comparison, the next proposal prompt adds a `Latest interleaved check` block with the freshly measured reference median, the last candidate's median, the performance score of that measurement, and the exact acceptance rule. The accepted median can be seconds or minutes old; this block makes the proposer aim at what the current best measures on this machine now. The archive and report still record the accepted measurement, which remains the score basis.
+
 In performance mode the two sides are measured together: `evaluateTask` runs the candidate and the current best alternately, starting with a different side each round and rounding an odd run count up to an even number of rounds. Per-round pairs are stored in `benchmarkComparison.pairs`, and the medians, paired ratio, paired delta, win count, and run counts are written to `iterations.jsonl` and the CLI JSON (`referenceBenchMs`, `referenceRuns`, `pairedRatio`, `pairedDeltaMs`, `pairedWins`, `pairedRounds`). The loop recomputes `previousBest.score` from that comparison before deciding, so CPU-frequency drift and JIT warm-up cannot systematically favour either solution. A benchmark-driven acceptance (performance-only, or a score gain that comes entirely from the benchmark component) is then re-measured with `compareBenchmarks`; the confirmation does not re-run the public or hidden tests. Both comparisons must pass, and the accepted iteration records the confirmation measurement. A score gain that also raises hidden correctness or static quality is not benchmark-driven and does not need a confirmation.
 
 ### Hidden tests
@@ -373,7 +375,7 @@ This distinction matters. Calling the loop "RSI" is useful shorthand for the sca
 - Patch-based proposals plus a reviewer model that must justify the diff.
 - Cost and latency budgets alongside score.
 - Calibrate the remaining single-digit-millisecond workloads (union-find, top-k-frequent) so a 5% win also clears the 0.5ms absolute floor.
-- Feed the latest interleaved reference median into the next proposal prompt; today the prompt shows the best's last accepted measurement.
+- Add an optional `doctor --calibrate` that runs identical-code paired comparisons and flags workloads too noisy for the 5/6 gate.
 - Multi-proposer ensembles and cross-model review.
 - Contamination checks that reject suspiciously specific solutions.
 - A human review UI that shows the diff, test deltas, and benchmark deltas before `--apply`.

@@ -38,7 +38,7 @@ Your job is to produce the next candidate implementation for the task below. You
 
 {{BENCHMARK_RESULT}}
 
-Lower median time is better when correctness is equal. If the target is already met, still look for a faster implementation that preserves behavior and reduces the median by at least 5%. If the target is missed, change the algorithm or data structures rather than micro-optimizing.
+Lower median time is better when correctness is equal. If the target is already met, still look for a faster implementation that preserves behavior and reduces the median by at least 5% (and by at least 0.5ms). The harness re-measures every speedup against the current best in alternating rounds and then once more, so a real algorithmic win beats a micro-optimization that only looks faster once. If the target is missed, change the algorithm or data structures rather than micro-optimizing.
 
 ## Lessons from earlier attempts and related tasks
 

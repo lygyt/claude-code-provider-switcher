@@ -164,6 +164,10 @@ export async function runTask(task, options = {}) {
   let bestFiles = baselineFiles;
   const history = [];
   let previousFailures = [];
+  // A rejected interleaved comparison still measured the current best on this
+  // machine. Carry that fresh reference into the next prompt so the proposer
+  // targets the real number rather than the last accepted median.
+  let latestReference;
   const workspaceTree = await walkFiles(task.workspaceDir);
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
@@ -182,6 +186,13 @@ export async function runTask(task, options = {}) {
       benchMs: best.benchMs,
       performance: best.performance,
       benchmarkRuns: best.benchmarkRuns,
+      referenceBenchMs: latestReference?.benchMs,
+      referenceRuns: latestReference?.runs?.length,
+      referenceRounds: latestReference?.rounds,
+      referencePerformance: latestReference?.performance,
+      latestCandidateMs: latestReference?.candidateMs,
+      minSpeedup,
+      minSpeedupMs,
       workspaceTree,
       publicResult: best.publicResult,
       hiddenResult: best.hiddenResult,
@@ -294,7 +305,20 @@ export async function runTask(task, options = {}) {
       best = candidate;
       bestFiles = normalizedFiles;
       previousFailures = [];
+      // The new best carries the fresh candidate-side measurement.
+      latestReference = undefined;
     } else {
+      const latestComparison = confirmation?.comparison ?? candidate.benchmarkComparison;
+      latestReference =
+        latestComparison && Number.isFinite(latestComparison.benchMs)
+          ? {
+              benchMs: latestComparison.benchMs,
+              runs: latestComparison.runs,
+              rounds: latestComparison.pairedRounds,
+              performance: latestComparison.score,
+              candidateMs: confirmation ? confirmation.benchMs : candidate.benchMs
+            }
+          : undefined;
       previousFailures = [
         ...previousFailures,
         summarizeFailure(candidate, task, {
