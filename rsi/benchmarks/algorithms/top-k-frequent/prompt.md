@@ -13,4 +13,4 @@ Requirements:
 - Return exactly the `k` most frequent values, ordered by frequency descending.
 - Break ties by value ascending. For example, `[4, 4, 1, 1, 2]` with `k = 2` returns `[1, 4]`.
 - The result must be deterministic and contain no duplicates.
-- The benchmark calls this with 100,000 numbers and 2,000 distinct values. Recomputing counts with a full scan per distinct value is too slow; use a hash map and a better selection or sort.
+- The benchmark calls this three times with 250,000 numbers and 2,000 distinct values. Recomputing counts with a full scan per distinct value is too slow; use a hash map and a better selection or sort.

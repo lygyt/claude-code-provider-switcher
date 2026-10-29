@@ -135,7 +135,7 @@ AND the same conditions hold in a second, independent comparison
 
 Round `i` runs the candidate and the best back to back. Requiring a win in almost every round rejects a single lucky pair, and the second comparison rejects a timing artifact that does not reproduce. Without a paired comparison (for example, when calling `acceptanceDecision` directly), the medians provide the fallback: `candidate.benchMs < previousBest.benchMs * (1 - minSpeedup)` and `previousBest.benchMs - candidate.benchMs >= minSpeedupMs`.
 
-This deliberately forbids trading correctness for speed. The absolute floor keeps sub-millisecond timer noise from counting as a win; the regex-match benchmark originally exposed this failure mode (a 0.01ms median could "improve" to 0.00ms), so that workload was recalibrated. The loop stops early when the best score reaches `targetScore` (default 0.98), unless performance mode is enabled; performance mode uses the remaining iterations to seek faster equal-score implementations and takes at least five benchmark runs per evaluation.
+This deliberately forbids trading correctness for speed. The absolute floor keeps sub-millisecond timer noise from counting as a win; the regex-match benchmark originally exposed this failure mode (a 0.01ms median could "improve" to 0.00ms), so that workload was recalibrated. The union-find and top-k-frequent workloads were later enlarged (3M elements; 250k numbers called three times) because their optimized times sat under 10ms, where 5% is smaller than the 0.5ms floor and a legitimate speedup could never be accepted. The loop stops early when the best score reaches `targetScore` (default 0.98), unless performance mode is enabled; performance mode uses the remaining iterations to seek faster equal-score implementations and takes at least five benchmark runs per evaluation.
 
 After a rejected interleaved comparison, the next proposal prompt adds a `Latest interleaved check` block with the freshly measured reference median, the last candidate's median, the performance score of that measurement, and the exact acceptance rule. The accepted median can be seconds or minutes old; this block makes the proposer aim at what the current best measures on this machine now. The archive and report still record the accepted measurement, which remains the score basis.
 
@@ -261,21 +261,21 @@ Scripted-oracle demo result (not a model measurement):
 
 ```text
 task                          baseline   best   delta   hidden  baseMs  bestMs  targetMs
-algorithms/aho-corasick       0.8000    1.0000  0.2000   3/3      2650    17      50
-algorithms/dijkstra           0.8000    1.0000  0.2000   2/2      -       62      200
-algorithms/edit-distance      0.8000    1.0000  0.2000   2/2      -       24      80
-algorithms/interval-merge     0.6500    1.0000  0.3500   4/4      7       59      120
-algorithms/lfu-cache          0.8000    1.0000  0.2000   3/3      -       64      100
-algorithms/lru-cache          0.8665    1.0000  0.1335   3/3      851     92      150
-algorithms/max-flow           0.8000    1.0000  0.2000   4/4      -       63      200
-algorithms/median-stream      0.8000    1.0000  0.2000   2/2      -       26      100
-algorithms/regex-match        0.8000    1.0000  0.2000   3/3      -       89      120
-algorithms/sliding-window-max 0.8000    1.0000  0.2000   3/3      602     18      60
-algorithms/top-k-frequent     0.8000    1.0000  0.2000   2/2      1441    7       80
-algorithms/union-find         0.8000    1.0000  0.2000   3/3      -       5       100
+algorithms/aho-corasick       0.8000    1.0000  0.2000   3/3      2541    22      50
+algorithms/dijkstra           0.8000    1.0000  0.2000   2/2      -       74      200
+algorithms/edit-distance      0.8000    1.0000  0.2000   2/2      -       25      80
+algorithms/interval-merge     0.6500    1.0000  0.3500   4/4      6       49      120
+algorithms/lfu-cache          0.8000    1.0000  0.2000   3/3      -       57      100
+algorithms/lru-cache          0.8773    1.0000  0.1227   3/3      794     105     150
+algorithms/max-flow           0.8000    1.0000  0.2000   4/4      2908    67      200
+algorithms/median-stream      0.8000    1.0000  0.2000   2/2      -       28      100
+algorithms/regex-match        0.8000    1.0000  0.2000   3/3      -       95      120
+algorithms/sliding-window-max 0.8000    1.0000  0.2000   3/3      639     17      60
+algorithms/top-k-frequent     0.8000    1.0000  0.2000   2/2      -       31      120
+algorithms/union-find         0.8000    1.0000  0.2000   3/3      -       40      150
 ```
 
-The optimization baselines are correct but miss the performance budget, so their score is `0.7 * 1 + 0.2 * 0 + 0.1 * 1 = 0.8`. The interval-merge baseline additionally fails two hidden correctness tests. A missing baseline time means the weak baseline produced no successful benchmark run. Benchmark times vary by machine; the demo asserts hidden-test success, not a fixed score. The lru-cache baseline score depends on its measured baseline time and therefore varies between runs.
+The optimization baselines are correct but miss the performance budget, so their score is `0.7 * 1 + 0.2 * 0 + 0.1 * 1 = 0.8`. The interval-merge baseline additionally fails two hidden correctness tests. A missing baseline time means the weak baseline produced no successful benchmark run; top-k-frequent and union-find now time out by design because their enlarged workloads make the O(n·distinct) and O(n²) baselines hopeless. Benchmark times vary by machine; the demo asserts hidden-test success, not a fixed score. The lru-cache baseline score depends on its measured baseline time and therefore varies between runs.
 
 ## Measured model run: before vs after performance mode
 
@@ -295,8 +295,8 @@ The after in-loop decisions used 3-run medians (the code at the time); the befor
 | `algorithms/median-stream` | 100 | 24.63 | 10.66 | -56.7% | 26.54 |
 | `algorithms/regex-match` | 120 | 18.33 | 10.62 | -42.1% | 88.96 |
 | `algorithms/sliding-window-max` | 60 | 13.43 | 9.33 | -30.6% | 16.98 |
-| `algorithms/top-k-frequent` | 80 | 6.18 | 4.88 | -21.1% | 6.46 |
-| `algorithms/union-find` | 100 | 3.95 | 3.60 | -8.6% | 4.12 |
+| `algorithms/top-k-frequent` | 120 | 6.18 | 4.88 | -21.1% | 6.46 |
+| `algorithms/union-find` | 150 | 3.95 | 3.60 | -8.6% | 4.12 |
 
 Times are milliseconds; lower is better. The median reduction is **44.1%** and the geometric-mean reduction is **52.3%**. Eleven tasks are at least 5% faster; dijkstra is flat within noise. Every after time meets its target (the tightest is lfu-cache at 25.66ms against 100ms). The after solution is also faster than the hand-written reference on every task.
 
@@ -317,6 +317,7 @@ Caveats:
 - Two iteration-3 proposer calls timed out at 600s (interval-merge and max-flow) and were recorded as rejected iterations; the earlier accepted solutions stayed best.
 - The 3-run in-loop medians were sometimes misleading: dijkstra's before best read 25ms in the suite but 11.41ms under interleaved measurement, so its apparent 2× gain was mostly noise. This is why performance mode now takes at least five benchmark runs, requires an absolute win, re-measures candidate and best in alternating rounds, and confirms every performance-only acceptance with a second comparison. On this machine, identical code compared in six paired rounds still produced a 5%-plus median win in 1 of 20 trials; the 5/6 win requirement and the confirmation stage exist to reject exactly that artifact.
 - `regex-match` was recalibrated after the run because its old workload measured 0ms. The table uses the new 20,000-character workload (target 120ms). The suite's in-loop regex iteration saw the old workload and accepted a sub-millisecond "win"; the new `--min-speedup-ms` floor would reject it.
+- The `top-k-frequent` and `union-find` rows were measured on the pre-calibration workloads (50k numbers ×2 and 100k elements), so their absolute times are not comparable to the current bench. The after archives re-measure at 22.3ms and 32.2ms on the current 250k ×3 and 3M-element workloads. Those sizes were chosen so a 5% win (1.1ms and 1.6ms) clears the 0.5ms floor; at the old scale it could not, which made further performance acceptance impossible on those tasks.
 
 ## Repository layout
 
@@ -374,7 +375,6 @@ This distinction matters. Calling the loop "RSI" is useful shorthand for the sca
 - Mutation testing to detect weak hidden tests.
 - Patch-based proposals plus a reviewer model that must justify the diff.
 - Cost and latency budgets alongside score.
-- Calibrate the remaining single-digit-millisecond workloads (union-find, top-k-frequent) so a 5% win also clears the 0.5ms absolute floor.
 - Add an optional `doctor --calibrate` that runs identical-code paired comparisons and flags workloads too noisy for the 5/6 gate.
 - Multi-proposer ensembles and cross-model review.
 - Contamination checks that reject suspiciously specific solutions.
